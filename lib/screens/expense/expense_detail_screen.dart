@@ -276,67 +276,67 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
             iconTheme: const IconThemeData(color: Colors.white),
-            actions: [
-              IconButton(
-                onPressed: _isUploading ? null : _pickAndUploadMedia,
+        actions: [
+          IconButton(
+            onPressed: _isUploading ? null : _pickAndUploadMedia,
                 icon: const Icon(Icons.add_photo_alternate, color: Colors.white),
-                tooltip: 'Chọn ảnh minh chứng',
-              ),
-              PopupMenuButton<String>(
-                onSelected: (value) async {
-                  if (value == 'edit') {
-                    final result = await Navigator.pushNamed(
-                      context,
-                      '/edit-expense',
-                      arguments: widget.expenseId,
-                    );
+            tooltip: 'Chọn ảnh minh chứng',
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'edit') {
+                final result = await Navigator.pushNamed(
+                  context,
+                  '/edit-expense',
+                  arguments: widget.expenseId,
+                );
 
-                    //Nếu sửa thành công thì reload lại dữ liệu
-                    if (result == true) {
-                      _loadData();
+                //Nếu sửa thành công thì reload lại dữ liệu
+                if (result == true) {
+                  _loadData();
+                  Navigator.pop(context, true);
+                }
+              } else if (value == 'delete') {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Xác nhận xoá'),
+                    content:
+                        const Text('Bạn có chắc chắn muốn xoá khoản chi này?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Không'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Xoá'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (confirm == true) {
+                  try {
+                    await AuthService.dio
+                        .delete('/expense/${widget.expenseId}');
+                    if (context.mounted) {
                       Navigator.pop(context, true);
                     }
-                  } else if (value == 'delete') {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Xác nhận xoá'),
-                        content:
-                            const Text('Bạn có chắc chắn muốn xoá khoản chi này?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Không'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Xoá'),
-                          ),
-                        ],
-                      ),
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Lỗi khi xoá: $e')),
                     );
-
-                    if (confirm == true) {
-                      try {
-                        await AuthService.dio
-                            .delete('/expense/${widget.expenseId}');
-                        if (context.mounted) {
-                          Navigator.pop(context, true);
-                        }
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Lỗi khi xoá: $e')),
-                        );
-                      }
-                    }
                   }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(value: 'edit', child: Text('✏️ Sửa')),
-                  const PopupMenuItem(value: 'delete', child: Text('🗑️ Xoá')),
-                ],
-              ),
+                }
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'edit', child: Text('✏️ Sửa')),
+              const PopupMenuItem(value: 'delete', child: Text('🗑️ Xoá')),
             ],
+          ),
+        ],
             systemOverlayStyle: const SystemUiOverlayStyle(
               statusBarColor: Colors.white,
               statusBarIconBrightness: Brightness.dark,

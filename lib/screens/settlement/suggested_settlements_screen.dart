@@ -114,7 +114,7 @@ class _SuggestedSettlementsScreenState
         ),
         title: Text(
           widget.userOnly
-              ? 'Gợi ý thanh toán của bạn'
+            ? 'Gợi ý thanh toán của bạn'
               : 'Tất cả gợi ý thanh toán',
           style: const TextStyle(
             color: Colors.white,

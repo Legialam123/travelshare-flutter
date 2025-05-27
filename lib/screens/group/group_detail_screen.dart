@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -22,7 +23,6 @@ import '../../models/user.dart';
 import '../expense/expense_detail_screen.dart';
 import '../group/group_management_screen.dart';
 import '../../utils/color_utils.dart';
-import 'package:flutter/services.dart';
 
 // 🎯 Helper class for category grouping
 class CategoryGroup {
@@ -380,7 +380,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(
-          0, 12, 0, 100), // 🎯 Bottom padding for FAB, no horizontal padding
+          12, 12, 12, 100), // 🎯 Bottom padding for FAB
       itemCount: categoryGroups.length,
       itemBuilder: (context, index) {
         final categoryGroup = categoryGroups[index];
@@ -388,203 +388,110 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         final categoryId = category['id']?.toString() ?? 'unknown';
         final isExpanded = categoryGroup.isExpanded;
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12, left: 12, right: 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: _safeColorFromHex(category['color']).withOpacity(0.15),
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: _safeColorFromHex(category['color']).withOpacity(0.08),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          elevation: 2,
           child: Column(
             children: [
               // 🎯 Category header
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
+              Container(
+                decoration: BoxDecoration(
+                  color: _safeColorFromHex(category['color']).withOpacity(0.1),
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                  ),
+                ),
+                child: ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color:
+                          _safeColorFromHex(category['color']).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      _getCategoryIcon(category['iconCode']),
+                      color: _safeColorFromHex(category['color']),
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    category['name'] ?? 'Không xác định',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${categoryGroup.expenses.length} Chi phí',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 13,
+                    ),
+                  ),
+                  trailing: SizedBox(
+                    width: 140, // 🎯 Fixed width to prevent overflow
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                _currencyFormat
+                                    .format(categoryGroup.totalAmount),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: _safeColorFromHex(category['color']),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.right,
+                              ),
+                              Text(
+                                '${((categoryGroup.totalAmount / expenses.fold<double>(0.0, (sum, e) => sum + _getExpenseAmount(e))) * 100).toStringAsFixed(1)}%',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 11,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.right,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          isExpanded ? Icons.expand_less : Icons.expand_more,
+                          color: Colors.grey[600],
+                          size: 20,
+                        ),
+                      ],
+                    ),
                   ),
                   onTap: () {
                     setState(() {
                       _categoryExpansionState[categoryId] = !isExpanded;
                     });
                   },
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          _safeColorFromHex(category['color'])
-                              .withOpacity(0.08),
-                          _safeColorFromHex(category['color'])
-                              .withOpacity(0.03),
-                        ],
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                      ),
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(20),
-                        topRight: Radius.circular(20),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: _safeColorFromHex(category['color']),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: _safeColorFromHex(category['color'])
-                                    .withOpacity(0.3),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Icon(
-                            _getCategoryIcon(category['iconCode']),
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                category['name'] ?? 'Không xác định',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.group_outlined,
-                                    size: 16,
-                                    color: Colors.grey[600],
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '${categoryGroup.expenses.length} chi phí',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey[600],
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        SizedBox(
-                          width: 140,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      _currencyFormat
-                                          .format(categoryGroup.totalAmount),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                        color: _safeColorFromHex(
-                                            category['color']),
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.right,
-                                    ),
-                                    Text(
-                                      '${((categoryGroup.totalAmount / expenses.fold<double>(0.0, (sum, e) => sum + _getExpenseAmount(e))) * 100).toStringAsFixed(1)}%',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 11,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.right,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              AnimatedRotation(
-                                turns: isExpanded ? 0.5 : 0,
-                                duration: const Duration(milliseconds: 300),
-                                child: Icon(
-                                  Icons.keyboard_arrow_down,
-                                  color: _safeColorFromHex(category['color']),
-                                  size: 28,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
 
               // 🎯 Expenses in category (collapsible)
-              if (isExpanded) ...[
-                Container(
-                  height: 1,
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.transparent,
-                        _safeColorFromHex(category['color']).withOpacity(0.2),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
+              if (isExpanded)
+                Column(
+                  children: [
+                    const SizedBox(height: 8),
+                    ...categoryGroup.expenses.map<Widget>((expense) {
+                      return _buildExpenseListTile(expense,
+                          showCategory: false);
+                    }).toList(),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                ...categoryGroup.expenses.asMap().entries.map<Widget>((entry) {
-                  final expenseIndex = entry.key;
-                  final expense = entry.value;
-                  return Padding(
-                    padding: EdgeInsets.only(
-                      left: 16,
-                      right: 16,
-                      bottom: expenseIndex == categoryGroup.expenses.length - 1
-                          ? 16
-                          : 8,
-                    ),
-                    child: _buildExpenseListTile(expense, showCategory: false),
-                  );
-                }).toList(),
-              ],
             ],
           ),
         );
@@ -618,20 +525,18 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         : 'Chưa rõ ngày';
 
     final category = expense['category'];
-    // 🎯 Use category color for amount, fallback to green if no category
     final amountColor =
         category != null ? _safeColorFromHex(category['color']) : Colors.green;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: (category != null
-                  ? _safeColorFromHex(category['color'])
-                  : Colors.grey)
-              .withOpacity(0.2),
+          color: category != null
+              ? _safeColorFromHex(category['color']).withOpacity(0.2)
+              : Colors.grey.withOpacity(0.15),
           width: 1,
         ),
         boxShadow: [
@@ -672,100 +577,38 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                // Category icon with gradient (only show if showCategory is true)
+                // Icon danh mục
                 if (showCategory && category != null)
                   Container(
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
+                      color:
+                          _safeColorFromHex(category['color']).withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
-                      gradient: LinearGradient(
-                        colors: [
-                          _safeColorFromHex(category['color']),
-                          _safeColorFromHex(category['color']).withOpacity(0.7),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _safeColorFromHex(category['color'])
-                              .withOpacity(0.3),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
                     ),
-                    padding: const EdgeInsets.all(2),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        color: _safeColorFromHex(category['color'])
-                            .withOpacity(0.1),
-                        child: Icon(
-                          _getCategoryIcon(category['iconCode']),
-                          color: _safeColorFromHex(category['color']),
-                          size: 20,
-                        ),
-                      ),
+                    child: Icon(
+                      _getCategoryIcon(category['iconCode']),
+                      color: _safeColorFromHex(category['color']),
+                      size: 24,
                     ),
                   ),
                 if (showCategory && category != null) const SizedBox(width: 16),
-
-                // Expense info
+                // Thông tin chi phí
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Title and Amount row
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              expense['title'] ?? '',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _currencyFormat.format(expense['amount']),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: amountColor,
-                            ),
-                            textAlign: TextAlign.right,
-                          ),
-                        ],
+                      Text(
+                        expense['title'] ?? '',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.person_outline,
-                            size: 14,
-                            color: Colors.grey[500],
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              'Paid by ${expense['payer']?['name'] ?? '...'}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey[600],
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
                       Row(
                         children: [
                           Icon(
@@ -781,38 +624,56 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                               color: Colors.grey[600],
                             ),
                           ),
-                          if (showCategory && category != null) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: _safeColorFromHex(category['color'])
-                                    .withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.person_outline,
+                            size: 14,
+                            color: Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              expense['payer']?['name'] ?? '',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
                               ),
-                              child: Text(
-                                category['name'] ?? '',
-                                style: TextStyle(
-                                  color: _safeColorFromHex(category['color']),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ],
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
-
-                // Arrow icon only
+                // Số tiền
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: amountColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _currencyFormat.format(expense['amount']),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: amountColor,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 8),
-                Icon(
+                const Icon(
                   Icons.arrow_forward_ios,
                   size: 16,
-                  color: Colors.grey.withOpacity(0.6),
+                  color: Color(0xFF667eea),
                 ),
               ],
             ),
@@ -1460,8 +1321,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
       },
       child: Scaffold(
         appBar: PreferredSize(
-          preferredSize:
-              const Size.fromHeight(kToolbarHeight + 48), // 48 cho TabBar
+          preferredSize: const Size.fromHeight(kToolbarHeight + 48),
           child: Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -1471,11 +1331,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               ),
             ),
             child: AppBar(
-              systemOverlayStyle: const SystemUiOverlayStyle(
-                statusBarColor: Colors.white, // hoặc màu nền bạn muốn
-                statusBarIconBrightness: Brightness.dark,
-                statusBarBrightness: Brightness.light,
-              ),
               title: widget.groupName != null
                   ? Text(widget.groupName!,
                       style: const TextStyle(
@@ -1511,6 +1366,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               backgroundColor: Colors.transparent,
               foregroundColor: Colors.white,
               iconTheme: const IconThemeData(color: Colors.white),
+              systemOverlayStyle: const SystemUiOverlayStyle(
+                statusBarColor: Colors.white,
+                statusBarIconBrightness: Brightness.dark,
+                statusBarBrightness: Brightness.light,
+              ),
               actions: [
                 IconButton(
                   icon: const Icon(Icons.menu),
@@ -1563,14 +1423,23 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(48),
                 child: Container(
-                  color: Colors.white,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
                   child: TabBar(
                     controller: _tabController,
-                    labelColor: Colors.deepPurple,
-                    unselectedLabelColor: Colors.black54,
-                    indicatorColor: Colors.deepPurple,
+                    labelColor: Color(0xFF667eea),
+                    unselectedLabelColor: Colors.grey,
+                    indicatorColor: Color(0xFF667eea),
                     tabs: const [
-                      Tab(text: 'Expenses'),
+                      Tab(text: 'Chi phí'),
                       Tab(text: 'Balances'),
                       Tab(text: 'Photos'),
                     ],
@@ -1580,7 +1449,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             ),
           ),
         ),
-        backgroundColor: Colors.grey[50],
         body: FutureBuilder<Group>(
           future: _groupFuture,
           builder: (context, snapshot) {
@@ -1705,7 +1573,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                                   ),
                                   const Spacer(),
                                   Text(
-                                    '${expenses.length} chi phí',
+                                    '${expenses.length} Chi phí',
                                     style: TextStyle(
                                       color: Colors.grey[600],
                                       fontSize: 13,
@@ -1760,7 +1628,19 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                         double totalOwed = 0;
                         double totalReceivable = 0;
 
-                        for (var b in balances) {
+                        // Đưa số dư của bạn lên đầu danh sách
+                        List<dynamic> sortedBalances = List.from(balances);
+                        if (currentUserId != null) {
+                          sortedBalances.sort((a, b) {
+                            if (a['participantUserId'] == currentUserId)
+                              return -1;
+                            if (b['participantUserId'] == currentUserId)
+                              return 1;
+                            return 0;
+                          });
+                        }
+
+                        for (var b in sortedBalances) {
                           if (b['participantUserId'] == currentUserId) {
                             double value = (b['balance'] ?? 0).toDouble();
                             if (value < 0) totalOwed += value.abs();
@@ -1771,61 +1651,145 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            const SizedBox(height: 12),
                             Padding(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 4),
-                              child: Card(
-                                child: ListTile(
-                                  title:
-                                      const Text('Xem tất cả gợi ý thanh toán'),
-                                  trailing: const Icon(Icons.chevron_right),
-                                  onTap: () {
-                                    Navigator.pushNamed(
-                                      context,
-                                      '/suggested-settlements',
-                                      arguments: {
-                                        'groupId': widget.groupId,
-                                        'userOnly': false,
-                                      },
-                                    ).then((_) => _reloadBalances());
-                                  },
-                                ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Container(
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        gradient: const LinearGradient(
+                                          colors: [
+                                            Color(0xFF667eea),
+                                            Color(0xFF764ba2)
+                                          ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(15),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF667eea)
+                                                .withOpacity(0.18),
+                                            blurRadius: 12,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        borderRadius: BorderRadius.circular(15),
+                                        child: InkWell(
+                                          borderRadius:
+                                              BorderRadius.circular(15),
+                                          onTap: () {
+                                            Navigator.pushNamed(
+                                              context,
+                                              '/suggested-settlements',
+                                              arguments: {
+                                                'groupId': widget.groupId,
+                                                'userOnly': false,
+                                              },
+                                            ).then((_) => _reloadBalances());
+                                          },
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: const [
+                                              Icon(Icons.list_alt,
+                                                  color: Colors.white,
+                                                  size: 22),
+                                              SizedBox(width: 10),
+                                              Text(
+                                                  'Xem tất cả gợi ý thanh toán',
+                                                  style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 15)),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             if (totalOwed > 0 || totalReceivable > 0)
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 12, vertical: 4),
-                                child: Card(
-                                  color: Colors.grey[50],
-                                  child: ListTile(
-                                    leading: Icon(
-                                      totalOwed > 0
-                                          ? Icons.money_off
-                                          : Icons.attach_money,
-                                      color: totalOwed > 0
-                                          ? Colors.red
-                                          : Colors.green,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Container(
+                                        height: 48,
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [
+                                              Color(0xFF667eea),
+                                              Color(0xFF764ba2)
+                                            ],
+                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(15),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: const Color(0xFF667eea)
+                                                  .withOpacity(0.18),
+                                              blurRadius: 12,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(15),
+                                          child: InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(15),
+                                            onTap: () {
+                                              Navigator.pushNamed(
+                                                context,
+                                                '/suggested-settlements',
+                                                arguments: {
+                                                  'groupId': widget.groupId,
+                                                  'userOnly': true,
+                                                },
+                                              ).then((_) => _reloadBalances());
+                                            },
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  totalOwed > 0
+                                                      ? Icons.money_off
+                                                      : Icons.attach_money,
+                                                  color: Colors.white,
+                                                  size: 22,
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Text(
+                                                  totalOwed > 0
+                                                      ? 'Bạn đang nợ người khác ${_currencyFormat.format(totalOwed)}'
+                                                      : 'Người khác đang nợ bạn ${_currencyFormat.format(totalReceivable)}',
+                                                  style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 15),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
-                                    title: Text(
-                                      totalOwed > 0
-                                          ? 'Bạn đang nợ người khác ${_currencyFormat.format(totalOwed)}'
-                                          : 'Người khác đang nợ bạn ${_currencyFormat.format(totalReceivable)}',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w500),
-                                    ),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () {
-                                      Navigator.pushNamed(
-                                        context,
-                                        '/suggested-settlements',
-                                        arguments: {
-                                          'groupId': widget.groupId,
-                                          'userOnly': true,
-                                        },
-                                      ).then((_) => _reloadBalances());
-                                    },
-                                  ),
+                                  ],
                                 ),
                               ),
                             const Padding(
@@ -1839,9 +1803,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                             ),
                             Expanded(
                               child: ListView.builder(
-                                itemCount: balances.length,
+                                itemCount: sortedBalances.length,
                                 itemBuilder: (context, index) {
-                                  final b = balances[index];
+                                  final b = sortedBalances[index];
                                   final name =
                                       b['participantName'] ?? 'Người dùng';
                                   final balance = b['balance'] ?? 0.0;
@@ -1867,28 +1831,35 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                                                     'assets/images/default_user_avatar.png')
                                                 as ImageProvider,
                                       ),
-                                      title: Text(name),
+                                      title: Text(
+                                        name,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black87,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                       subtitle: isMe
                                           ? const Text('Bạn',
                                               style: TextStyle(
                                                   fontStyle: FontStyle.italic))
-                                          : const SizedBox.shrink(),
-                                      trailing: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
+                                          : null,
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Text(
                                             '${isPositive ? '+' : '-'}$formattedAmount',
                                             style: TextStyle(
                                               fontSize: 18,
-                                              fontWeight: FontWeight.bold,
                                               color: isPositive
                                                   ? Colors.green
                                                   : Colors.red,
+                                              fontWeight: FontWeight.bold,
                                             ),
                                           ),
+                                          if (!isMe) const SizedBox(width: 16),
                                         ],
                                       ),
                                     ),
@@ -2521,7 +2492,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             ? Container(
                 margin: const EdgeInsets.only(bottom: 20),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(22), // 🎯 More rounded
+                  borderRadius: BorderRadius.circular(22),
                   gradient: const LinearGradient(
                     colors: [
                       Color(0xFF667eea), // Blue-purple
@@ -2540,11 +2511,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                 ),
                 child: Material(
                   color: Colors.transparent,
-                  borderRadius:
-                      BorderRadius.circular(22), // 🎯 Match container radius
+                  borderRadius: BorderRadius.circular(22),
                   child: InkWell(
-                    borderRadius:
-                        BorderRadius.circular(22), // 🎯 Match container radius
+                    borderRadius: BorderRadius.circular(22),
                     onTap: () async {
                       final groupDetail =
                           await GroupDetailService.fetchGroupDetail(
@@ -2575,20 +2544,18 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                       }
                     },
                     child: Container(
-                      width: 62, // 🎯 Updated size
+                      width: 62,
                       height: 62,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(
-                            22), // 🎯 Match container radius
+                        borderRadius: BorderRadius.circular(22),
                         border: Border.all(
-                          color: Colors.white
-                              .withOpacity(0.3), // 🎯 Slightly more visible
-                          width: 1.5, // 🎯 Slightly thicker border
+                          color: Colors.white.withOpacity(0.3),
+                          width: 1.5,
                         ),
                       ),
                       child: const Icon(
                         Icons.add_rounded,
-                        size: 30, // 🎯 Updated icon size
+                        size: 30,
                         color: Colors.white,
                       ),
                     ),
@@ -2599,8 +2566,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                 ? Container(
                     margin: const EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(
-                      borderRadius:
-                          BorderRadius.circular(22), // 🎯 More rounded
+                      borderRadius: BorderRadius.circular(22),
                       gradient: const LinearGradient(
                         colors: [
                           Color(0xFF667eea), // Blue-purple
@@ -2619,29 +2585,25 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                     ),
                     child: Material(
                       color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(
-                          22), // 🎯 Match container radius
+                      borderRadius: BorderRadius.circular(22),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(
-                            22), // 🎯 Match container radius
+                        borderRadius: BorderRadius.circular(22),
                         onTap: () {
                           _pickAndUploadMedia(fromCamera: false, isImage: true);
                         },
                         child: Container(
-                          width: 62, // 🎯 Updated size
+                          width: 62,
                           height: 62,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(
-                                22), // 🎯 Match container radius
+                            borderRadius: BorderRadius.circular(22),
                             border: Border.all(
-                              color: Colors.white
-                                  .withOpacity(0.3), // 🎯 Slightly more visible
-                              width: 1.5, // 🎯 Slightly thicker border
+                              color: Colors.white.withOpacity(0.3),
+                              width: 1.5,
                             ),
                           ),
                           child: const Icon(
                             Icons.add_a_photo_rounded,
-                            size: 26, // 🎯 Updated icon size
+                            size: 26,
                             color: Colors.white,
                           ),
                         ),

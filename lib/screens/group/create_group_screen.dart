@@ -231,7 +231,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate() || _selectedCurrency == null || _selectedCategory == null) {
+    if (!_formKey.currentState!.validate() ||
+        _selectedCurrency == null ||
+        _selectedCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Vui lòng điền đầy đủ thông tin.')),
       );
@@ -286,7 +288,11 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tạo nhóm mới', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+        title: const Text('Tạo nhóm mới',
+            style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 20)),
         elevation: 0,
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
@@ -313,13 +319,87 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // AVATAR CHỌN ẢNH ĐẠI DIỆN ĐẦU MÀN HÌNH
+              Center(
+                child: GestureDetector(
+                  onTap: _pickImage,
+                  child: _pickedImage == null
+                      ? Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black12,
+                                blurRadius: 8,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Center(
+                            child: Icon(Icons.add_a_photo,
+                                color: Colors.white, size: 32),
+                          ),
+                        )
+                      : Stack(
+                          alignment: Alignment.topRight,
+                          children: [
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black12,
+                                    blurRadius: 8,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: ClipOval(
+                                child: Image.file(
+                                  File(_pickedImage!.path),
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 2,
+                              right: 2,
+                              child: GestureDetector(
+                                onTap: () =>
+                                    setState(() => _pickedImage = null),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  padding: const EdgeInsets.all(4),
+                                  child: const Icon(Icons.close,
+                                      color: Colors.white, size: 18),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+              const SizedBox(height: 22),
               TextFormField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(labelText: 'Tên nhóm'),
-                validator: (value) => value == null || value.isEmpty
-                    ? 'Nhập tên nhóm'
-                    : null,
+                validator: (value) =>
+                    value == null || value.isEmpty ? 'Nhập tên nhóm' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -337,7 +417,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 },
               ),
               const SizedBox(height: 16),
-              
+
               // Phần chọn danh mục
               FutureBuilder<List<Category>>(
                 future: _categoriesFuture,
@@ -353,33 +433,35 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   return DropdownButtonFormField<Category>(
                     value: _selectedCategory,
                     decoration: const InputDecoration(labelText: 'Danh mục'),
-                    items: snapshot.data!.map((category) => 
-                      DropdownMenuItem(
-                        value: category, 
-                        child: Row(
-                          children: [
-                            if (category.iconCode != null)
-                              Icon(
-                                getIconDataFromCode(category.iconCode),
-                                color: HexColor.fromHex(category.color ?? '#000000'),
-                                size: 20,
-                              ),
-                            const SizedBox(width: 8),
-                            Text(category.name),
-                          ],
-                        ),
-                      ),
-                    ).toList(),
+                    items: snapshot.data!
+                        .map(
+                          (category) => DropdownMenuItem(
+                            value: category,
+                            child: Row(
+                              children: [
+                                if (category.iconCode != null)
+                                  Icon(
+                                    getIconDataFromCode(category.iconCode),
+                                    color: HexColor.fromHex(
+                                        category.color ?? '#000000'),
+                                    size: 20,
+                                  ),
+                                const SizedBox(width: 8),
+                                Text(category.name),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
                     onChanged: (Category? value) {
                       setState(() => _selectedCategory = value);
                     },
-                    validator: (value) => value == null 
-                      ? 'Vui lòng chọn danh mục' 
-                      : null,
+                    validator: (value) =>
+                        value == null ? 'Vui lòng chọn danh mục' : null,
                   );
                 },
               ),
-              
+
               const SizedBox(height: 16),
               FutureBuilder<List<Currency>>(
                 future: _currenciesFuture,
@@ -413,44 +495,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 },
               ),
 
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.image),
-                    label: const Text('Chọn ảnh đại diện'),
-                  ),
-                  const SizedBox(width: 12),
-                  if (_pickedImage != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Stack(
-                        alignment: Alignment.topRight,
-                        children: [
-                          Image.file(
-                            File(_pickedImage!.path),
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.cover,
-                          ),
-                          GestureDetector(
-                            onTap: () => setState(() => _pickedImage = null),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(Icons.close,
-                                  color: Colors.white, size: 18),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 18),
               const Text('Thành viên tham gia',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               // Dòng thêm thành viên
@@ -610,13 +655,56 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 },
               ),
               const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  child: _isSubmitting
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Tạo nhóm'),
+              // NÚT TẠO NHÓM GIAO DIỆN HIỆN ĐẠI
+              Center(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                    ),
+                    borderRadius: BorderRadius.circular(15),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF667eea).withOpacity(0.3),
+                        blurRadius: 15,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(15),
+                      onTap: _isSubmitting ? null : _submit,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 28, vertical: 12),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                height: 22,
+                                width: 22,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2),
+                              )
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: const [
+                                  Icon(Icons.group_add, color: Colors.white),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    'Tạo nhóm',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -625,7 +713,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       ),
     );
   }
-  
+
   Color _getColorFromHex(String hexColor) {
     hexColor = hexColor.replaceAll("#", "");
     if (hexColor.length == 6) {
@@ -634,4 +722,3 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     return Color(int.parse(hexColor, radix: 16));
   }
 }
- 

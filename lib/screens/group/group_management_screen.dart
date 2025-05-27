@@ -78,7 +78,9 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, color: Colors.white),
                 onSelected: (value) async {
-                  if (value == 'leave') {
+                  if (value == 'edit') {
+                    _showEditGroupModal(context);
+                  } else if (value == 'leave') {
                     final lastAdmin = _isLastAdmin();
                     if (lastAdmin) {
                       // ❌ Nếu là Admin cuối cùng thì không cho rời
@@ -141,6 +143,10 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
                 },
                 itemBuilder: (context) => [
                   const PopupMenuItem(
+                    value: 'edit',
+                    child: Text('✏️ Sửa thông tin nhóm'),
+                  ),
+                  const PopupMenuItem(
                     value: 'leave',
                     child: Text('🚪 Rời khỏi nhóm'),
                   ),
@@ -179,12 +185,21 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  group.name,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        group.name,
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 const SizedBox(height: 4),
                                 // Hiển thị danh mục
@@ -232,11 +247,6 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
                                 ),
                               ],
                             ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.edit),
-                            tooltip: 'Sửa thông tin',
-                            onPressed: () => _showEditGroupModal(context),
                           ),
                         ],
                       ),

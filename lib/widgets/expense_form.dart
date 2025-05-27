@@ -76,7 +76,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
           children: [
             TextFormField(
               controller: _titleController,
-              decoration: const InputDecoration(labelText: 'Tên khoản chi'),
+              decoration: const InputDecoration(labelText: 'Tên chi phí'),
               validator: (val) =>
                   val == null || val.isEmpty ? 'Không để trống' : null,
             ),
@@ -194,7 +194,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
                   widget.onSubmit(formData, _newAttachments);
                 }
               },
-              child: Text(widget.isEdit ? 'Cập nhật' : 'Tạo khoản chi'),
+              child: Text(widget.isEdit ? 'Cập nhật' : 'Tạo chi phí'),
             ),
           ],
         ),
