@@ -162,4 +162,27 @@ class AuthService {
       throw Exception('Lỗi gửi email: ${response.data}');
     }
   }
+
+  static Future<String?> getCurrentEmail() async {
+    final token = await getAccessToken();
+    if (token == null) return null;
+    try {
+      final response = await dio.get('/users/me');
+      if (response.statusCode == 200 && response.data['result'] != null) {
+        return response.data['result']['email'];
+      }
+    } catch (e) {
+      print('Lỗi lấy email: $e');
+    }
+    return null;
+  }
+
+  static Future<bool> checkEmailExists(String email) async {
+    final response =
+        await dio.get('/users/check-email', queryParameters: {'email': email});
+    if (response.statusCode == 200) {
+      return response.data == true || response.data == 'true';
+    }
+    throw Exception('Lỗi kiểm tra email');
+  }
 }

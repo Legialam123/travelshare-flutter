@@ -34,7 +34,6 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   late Future<Map<String, dynamic>?> _expenseFuture =
       ExpenseService.fetchExpenseDetail(widget.expenseId);
   User? _currentUser;
-  Map<String, String?> participantAvatars = {};
 
   final ImagePicker _picker = ImagePicker();
   bool _isUploading = false;
@@ -75,15 +74,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Future<String?> _loadAvatar(String? userId) async {
     if (userId == null) return null;
-    if (participantAvatars.containsKey(userId)) {
-      return participantAvatars[userId];
-    }
     final url = await MediaService.fetchUserAvatar(userId);
-    final replacedUrl = replaceBaseUrl(url);
-    setState(() {
-      participantAvatars[userId] = replacedUrl;
-    });
-    return replacedUrl;
+    return replaceBaseUrl(url);
   }
 
   MediaType _getMediaType(String filePath) {
@@ -271,72 +263,77 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ),
           ),
           child: AppBar(
-            title: const Text('Chi tiết chi phí', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+            title: const Text('Chi tiết chi phí',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20)),
             elevation: 0,
             backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
             iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            onPressed: _isUploading ? null : _pickAndUploadMedia,
-                icon: const Icon(Icons.add_photo_alternate, color: Colors.white),
-            tooltip: 'Chọn ảnh minh chứng',
-          ),
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'edit') {
-                final result = await Navigator.pushNamed(
-                  context,
-                  '/edit-expense',
-                  arguments: widget.expenseId,
-                );
+            actions: [
+              IconButton(
+                onPressed: _isUploading ? null : _pickAndUploadMedia,
+                icon:
+                    const Icon(Icons.add_photo_alternate, color: Colors.white),
+                tooltip: 'Chọn ảnh minh chứng',
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) async {
+                  if (value == 'edit') {
+                    final result = await Navigator.pushNamed(
+                      context,
+                      '/edit-expense',
+                      arguments: widget.expenseId,
+                    );
 
-                //Nếu sửa thành công thì reload lại dữ liệu
-                if (result == true) {
-                  _loadData();
-                  Navigator.pop(context, true);
-                }
-              } else if (value == 'delete') {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Xác nhận xoá'),
-                    content:
-                        const Text('Bạn có chắc chắn muốn xoá khoản chi này?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Không'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Xoá'),
-                      ),
-                    ],
-                  ),
-                );
-
-                if (confirm == true) {
-                  try {
-                    await AuthService.dio
-                        .delete('/expense/${widget.expenseId}');
-                    if (context.mounted) {
+                    //Nếu sửa thành công thì reload lại dữ liệu
+                    if (result == true) {
+                      _loadData();
                       Navigator.pop(context, true);
                     }
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Lỗi khi xoá: $e')),
+                  } else if (value == 'delete') {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Xác nhận xoá'),
+                        content: const Text(
+                            'Bạn có chắc chắn muốn xoá khoản chi này?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Không'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Xoá'),
+                          ),
+                        ],
+                      ),
                     );
+
+                    if (confirm == true) {
+                      try {
+                        await AuthService.dio
+                            .delete('/expense/${widget.expenseId}');
+                        if (context.mounted) {
+                          Navigator.pop(context, true);
+                        }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Lỗi khi xoá: $e')),
+                        );
+                      }
+                    }
                   }
-                }
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'edit', child: Text('✏️ Sửa')),
-              const PopupMenuItem(value: 'delete', child: Text('🗑️ Xoá')),
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'edit', child: Text('✏️ Sửa')),
+                  const PopupMenuItem(value: 'delete', child: Text('🗑️ Xoá')),
+                ],
+              ),
             ],
-          ),
-        ],
             systemOverlayStyle: const SystemUiOverlayStyle(
               statusBarColor: Colors.white,
               statusBarIconBrightness: Brightness.dark,
@@ -358,8 +355,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           final splits = data['splits'] as List<dynamic>? ?? [];
           final category = data['category'];
 
+          final payerUser = payer['user'];
           return FutureBuilder<String?>(
-            future: _loadAvatar(payer['user']?['id']),
+            future: _loadAvatar(payerUser?['id']),
             builder: (context, payerSnapshot) {
               final payerAvatar = payerSnapshot.data;
               return SingleChildScrollView(
@@ -457,12 +455,23 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                                     ),
                                   ],
                                 ),
-                                Text(
-                                  _currencyFormat.format(data['amount']),
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.green,
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: HexColor.fromHex(
+                                            category['color'] ?? '#2196F3')
+                                        .withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    _currencyFormat.format(data['amount']),
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: HexColor.fromHex(
+                                          category['color'] ?? '#2196F3'),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -485,57 +494,68 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                     ),
                     const SizedBox(height: 12),
                     Card(
-                      elevation: 1,
+                      elevation: 3,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        leading: CircleAvatar(
-                          radius: 24,
-                          backgroundImage: payerAvatar != null &&
-                                  payerAvatar.isNotEmpty
-                              ? NetworkImage(payerAvatar)
-                              : const AssetImage(
-                                      'assets/images/default_user_avatar.png')
-                                  as ImageProvider,
-                        ),
-                        title: Text(
-                          payer['name'],
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                          ),
-                        ),
-                        subtitle: _currentUser?.id == payer['user']?['id']
-                            ? const Text(
-                                'Bạn',
-                                style: TextStyle(
-                                  color: Colors.blue,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              )
-                            : null,
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            _currencyFormat.format(data['amount']),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange,
-                              fontSize: 14,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 26,
+                              backgroundImage: (payerAvatar != null &&
+                                      payerAvatar.isNotEmpty)
+                                  ? NetworkImage(payerAvatar)
+                                  : const AssetImage(
+                                          'assets/images/default_user_avatar.png')
+                                      as ImageProvider,
                             ),
-                          ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    payer['name'],
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  if (_currentUser?.id == payer['user']?['id'])
+                                    const Text(
+                                      'Bạn',
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: HexColor.fromHex(
+                                        category['color'] ?? '#2196F3')
+                                    .withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                _currencyFormat.format(data['amount']),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: HexColor.fromHex(
+                                      category['color'] ?? '#2196F3'),
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -561,58 +581,67 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                         builder: (context, snapshot) {
                           final avatar = snapshot.data;
                           return Card(
-                            elevation: 1,
+                            elevation: 2,
                             margin: const EdgeInsets.only(bottom: 8),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(16),
                             ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              ),
-                              leading: CircleAvatar(
-                                radius: 22,
-                                backgroundImage: avatar != null &&
-                                        avatar.isNotEmpty
-                                    ? NetworkImage(avatar)
-                                    : const AssetImage(
-                                            'assets/images/default_user_avatar.png')
-                                        as ImageProvider,
-                              ),
-                              title: Text(
-                                participant['name'],
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              subtitle: isMe
-                                  ? const Text(
-                                      'Bạn',
-                                      style: TextStyle(
-                                        color: Colors.blue,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    )
-                                  : null,
-                              trailing: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Text(
-                                  _currencyFormat.format(split['amount']),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                    fontSize: 13,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 22,
+                                    backgroundImage: (avatar != null &&
+                                            avatar.isNotEmpty)
+                                        ? NetworkImage(avatar)
+                                        : const AssetImage(
+                                                'assets/images/default_user_avatar.png')
+                                            as ImageProvider,
                                   ),
-                                ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          participant['name'],
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        if (isMe)
+                                          const Text(
+                                            'Bạn',
+                                            style: TextStyle(
+                                              color: Colors.grey,
+                                              fontWeight: FontWeight.w500,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: Text(
+                                      _currencyFormat.format(split['amount']),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.green,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           );

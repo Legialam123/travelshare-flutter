@@ -78,6 +78,35 @@ class _ProfileScreenState extends State<ProfileScreen>
     return url.replaceFirst('http://localhost:8080/TravelShare', apiBaseUrl);
   }
 
+  void _showAvatarViewer() {
+    if (_user?.avatarUrl == null || _user!.avatarUrl!.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                getAvatarUrl(_user!.avatarUrl),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  color: Colors.grey[200],
+                  width: 300,
+                  height: 300,
+                  child: const Icon(Icons.broken_image,
+                      size: 80, color: Colors.grey),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmDeleteAccount() async {
     try {
       final url = "/users/$_userId";
@@ -220,9 +249,31 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false, // 🎯 Remove back button
-        toolbarHeight: 0, // 🎯 Hide AppBar completely
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: AppBar(
+            title: const Text(
+              'Tài khoản',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+              ),
+            ),
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            iconTheme: const IconThemeData(color: Colors.white),
+          ),
+        ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -233,7 +284,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
-                        const SizedBox(height: 40), // 🎯 More top spacing
+                        const SizedBox(height: 20), // Giảm khoảng cách trên xuống vì đã có AppBar
 
                         // 🎯 Profile Header - No Card
                         _fadeAnimation != null && _slideAnimation != null
@@ -246,32 +297,36 @@ class _ProfileScreenState extends State<ProfileScreen>
                                       // 🎯 Avatar with edit overlay
                                       Stack(
                                         children: [
-                                          Container(
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: const Color(0xFF667eea),
-                                                width: 4,
-                                              ),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withOpacity(0.1),
-                                                  blurRadius: 15,
-                                                  offset: const Offset(0, 5),
+                                          GestureDetector(
+                                            onTap: _showAvatarViewer,
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color:
+                                                      const Color(0xFF667eea),
+                                                  width: 4,
                                                 ),
-                                              ],
-                                            ),
-                                            child: CircleAvatar(
-                                              radius: 50,
-                                              backgroundImage: _user!
-                                                          .avatarUrl !=
-                                                      null
-                                                  ? NetworkImage(getAvatarUrl(
-                                                      _user!.avatarUrl))
-                                                  : const AssetImage(
-                                                          'assets/images/default_user_avatar.png')
-                                                      as ImageProvider,
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black
+                                                        .withOpacity(0.1),
+                                                    blurRadius: 15,
+                                                    offset: const Offset(0, 5),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: CircleAvatar(
+                                                radius: 50,
+                                                backgroundImage: _user!
+                                                            .avatarUrl !=
+                                                        null
+                                                    ? NetworkImage(getAvatarUrl(
+                                                        _user!.avatarUrl))
+                                                    : const AssetImage(
+                                                            'assets/images/default_user_avatar.png')
+                                                        as ImageProvider,
+                                              ),
                                             ),
                                           ),
                                           Positioned(
@@ -347,31 +402,34 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   // 🎯 Avatar with edit overlay
                                   Stack(
                                     children: [
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: const Color(0xFF667eea),
-                                            width: 4,
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color:
-                                                  Colors.black.withOpacity(0.1),
-                                              blurRadius: 15,
-                                              offset: const Offset(0, 5),
+                                      GestureDetector(
+                                        onTap: _showAvatarViewer,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: const Color(0xFF667eea),
+                                              width: 4,
                                             ),
-                                          ],
-                                        ),
-                                        child: CircleAvatar(
-                                          radius: 50,
-                                          backgroundImage: _user!.avatarUrl !=
-                                                  null
-                                              ? NetworkImage(getAvatarUrl(
-                                                  _user!.avatarUrl))
-                                              : const AssetImage(
-                                                      'assets/images/default_user_avatar.png')
-                                                  as ImageProvider,
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withOpacity(0.1),
+                                                blurRadius: 15,
+                                                offset: const Offset(0, 5),
+                                              ),
+                                            ],
+                                          ),
+                                          child: CircleAvatar(
+                                            radius: 50,
+                                            backgroundImage: _user!.avatarUrl !=
+                                                    null
+                                                ? NetworkImage(getAvatarUrl(
+                                                    _user!.avatarUrl))
+                                                : const AssetImage(
+                                                        'assets/images/default_user_avatar.png')
+                                                    as ImageProvider,
+                                          ),
                                         ),
                                       ),
                                       Positioned(
@@ -485,7 +543,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                               borderRadius: BorderRadius.circular(15),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF667eea).withOpacity(0.3),
+                                  color:
+                                      const Color(0xFF667eea).withOpacity(0.3),
                                   blurRadius: 15,
                                   offset: const Offset(0, 5),
                                 ),
@@ -498,12 +557,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                                 borderRadius: BorderRadius.circular(15),
                                 onTap: _onLogout,
                                 child: const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 10, horizontal: 18),
+                                  padding: EdgeInsets.symmetric(
+                                      vertical: 10, horizontal: 18),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.logout, color: Colors.white, size: 18),
+                                      Icon(Icons.logout,
+                                          color: Colors.white, size: 18),
                                       SizedBox(width: 8),
                                       Text(
                                         'Đăng xuất',

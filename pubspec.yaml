@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   flutter_dotenv: ^5.2.1 
   cupertino_icons: ^1.0.6
+  url_launcher: ^6.2.5
+
 
 
   # Quản lý trạng thái

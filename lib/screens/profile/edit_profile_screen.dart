@@ -80,7 +80,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? 'Chỉnh sửa' : 'Thông tin cá nhân', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+        title: Text(
+          _isEditing ? 'Chỉnh sửa' : 'Thông tin cá nhân',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
         elevation: 0,
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
@@ -105,11 +112,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ? Row(
                     children: [
                       IconButton(
-                        icon: const Icon(Icons.check),
-                        tooltip: 'Lưu thay đổi',
-                        onPressed: _saveChanges,
-                      ),
-                      IconButton(
                         icon: const Icon(Icons.close),
                         tooltip: 'Huỷ bỏ',
                         onPressed: _cancelEditing,
@@ -125,97 +127,190 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(24),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Họ tên",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    _isEditing
-                        ? TextFormField(
-                            controller: _nameController,
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Không được để trống';
-                              }
-                              if (RegExp(r'\d').hasMatch(value)) {
-                                return 'Họ tên không được chứa số';
-                              }
-                              return null;
-                            },
-                          )
-                        : Text(_user?.fullName ?? '',
-                            style: const TextStyle(fontSize: 16)),
-                    const SizedBox(height: 24),
-                    const Text("Email",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(_user?.email ?? '',
-                        style:
-                            const TextStyle(fontSize: 16, color: Colors.grey)),
-                    const SizedBox(height: 24),
-                    const Text("Số điện thoại",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    _isEditing
-                        ? TextFormField(
-                            controller: _phoneController,
-                            keyboardType: TextInputType.phone,
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return null; // Cho phép trống nếu muốn
-                              }
-                              if (!RegExp(r'^\d{10}$').hasMatch(value)) {
-                                return 'Số điện thoại phải đúng 10 chữ số';
-                              }
-                              return null;
-                            },
-                          )
-                        : Text(_user?.phoneNumber ?? 'Chưa có',
-                            style: const TextStyle(fontSize: 16)),
-                    const SizedBox(height: 24),
-                    const Text("Ngày sinh",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    _isEditing
-                        ? InkWell(
-                            onTap: () async {
-                              final pickedDate = await showDatePicker(
-                                context: context,
-                                initialDate: _dob ?? DateTime(2000),
-                                firstDate: DateTime(1900),
-                                lastDate: DateTime.now(),
-                              );
-                              if (pickedDate != null) {
-                                setState(() {
-                                  _dob = pickedDate;
-                                });
-                              }
-                            },
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                border: OutlineInputBorder(),
+          : SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 400),
+                margin: const EdgeInsets.only(top: 30),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.grey.withOpacity(0.13)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text("Họ tên",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      _isEditing
+                          ? TextFormField(
+                              controller: _nameController,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10)),
                                 isDense: true,
-                                contentPadding: EdgeInsets.all(12),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 10, horizontal: 12),
                               ),
-                              child: Text(
-                                _dob != null
-                                    ? "${_dob!.day.toString().padLeft(2, '0')}/${_dob!.month.toString().padLeft(2, '0')}/${_dob!.year}"
-                                    : 'Chọn ngày sinh',
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Không được để trống';
+                                }
+                                if (RegExp(r'\\d').hasMatch(value)) {
+                                  return 'Họ tên không được chứa số';
+                                }
+                                return null;
+                              },
+                            )
+                          : Text(_user?.fullName ?? '',
+                              style: const TextStyle(fontSize: 16)),
+                      const SizedBox(height: 18),
+                      const Text("Email",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text(_user?.email ?? '',
+                          style: const TextStyle(
+                              fontSize: 16, color: Colors.grey)),
+                      const SizedBox(height: 18),
+                      const Text("Số điện thoại",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      _isEditing
+                          ? TextFormField(
+                              controller: _phoneController,
+                              keyboardType: TextInputType.phone,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 10, horizontal: 12),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return null; // Cho phép trống nếu muốn
+                                }
+                                if (!RegExp(r'^\d{10}$').hasMatch(value)) {
+                                  return 'Số điện thoại phải đúng 10 chữ số';
+                                }
+                                return null;
+                              },
+                            )
+                          : Text(_user?.phoneNumber ?? 'Chưa có',
+                              style: const TextStyle(fontSize: 16)),
+                      const SizedBox(height: 18),
+                      const Text("Ngày sinh",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      _isEditing
+                          ? InkWell(
+                              onTap: () async {
+                                final pickedDate = await showDatePicker(
+                                  context: context,
+                                  initialDate: _dob ?? DateTime(2000),
+                                  firstDate: DateTime(1900),
+                                  lastDate: DateTime.now(),
+                                );
+                                if (pickedDate != null) {
+                                  setState(() {
+                                    _dob = pickedDate;
+                                  });
+                                }
+                              },
+                              child: InputDecorator(
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.all(10),
+                                ),
+                                child: Text(
+                                  _dob != null
+                                      ? "${_dob!.day.toString().padLeft(2, '0')}/${_dob!.month.toString().padLeft(2, '0')}/${_dob!.year}"
+                                      : 'Chọn ngày sinh',
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                              ),
+                            )
+                          : Text(
+                              _dob != null
+                                  ? "${_dob!.day.toString().padLeft(2, '0')}/${_dob!.month.toString().padLeft(2, '0')}/${_dob!.year}"
+                                  : 'Chưa có',
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                      if (_isEditing)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(top: 24),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF667eea),
+                                    Color(0xFF764ba2)
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF667eea)
+                                        .withOpacity(0.13),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Material(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(12),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: _saveChanges,
+                                  child: const Padding(
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: 18, vertical: 10),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.save,
+                                            color: Colors.white, size: 18),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Lưu thay đổi',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                          )
-                        : Text(
-                            _dob != null
-                                ? "${_dob!.day.toString().padLeft(2, '0')}/${_dob!.month.toString().padLeft(2, '0')}/${_dob!.year}"
-                                : 'Chưa có',
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                  ],
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),

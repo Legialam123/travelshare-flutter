@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:travel_share/screens/home/home_screen.dart';
 import 'package:travel_share/screens/profile/profile_screen.dart';
 import 'package:travel_share/screens/settlement/settlement_overview_screen.dart';
+import 'package:travel_share/screens/request/request_screen.dart';
+import 'package:travel_share/screens/notification/notification_screen.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({Key? key}) : super(key: key);
@@ -13,11 +15,27 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
-  final List<Widget> _screens = [
-    HomeScreen(),
-    SettlementOverviewScreen(),
-    ProfileScreen(),
-  ];
+  // Thêm GlobalKey cho NotificationScreen
+  final GlobalKey<NotificationScreenState> _notificationKey = GlobalKey<NotificationScreenState>();
+
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      HomeScreen(onGroupDetailPop: _handleGroupDetailPop),
+      RequestScreen(),
+      NotificationScreen(key: _notificationKey),
+      ProfileScreen(),
+    ];
+  }
+
+  // Hàm callback khi pop từ GroupDetailScreen
+  void _handleGroupDetailPop() {
+    // Chỉ reload notification ở background, không chuyển tab
+    _notificationKey.currentState?.reloadNotifications();
+  }
 
   void _onItemTapped(int index) {
     setState(() => _selectedIndex = index);
@@ -79,12 +97,11 @@ class _MainNavigationState extends State<MainNavigation> {
               items: [
                 BottomNavigationBarItem(
                   icon: Container(
-                    padding: const EdgeInsets.all(6), // 🎯 Smaller padding
+                    padding: const EdgeInsets.all(6),
                     decoration: _selectedIndex == 0
                         ? BoxDecoration(
                             color: Colors.white.withOpacity(0.2),
-                            borderRadius:
-                                BorderRadius.circular(10), // 🎯 Smaller radius
+                            borderRadius: BorderRadius.circular(10),
                           )
                         : null,
                     child: Icon(
@@ -92,45 +109,62 @@ class _MainNavigationState extends State<MainNavigation> {
                           ? Icons.card_travel
                           : Icons.card_travel_outlined,
                       color: Colors.white,
-                      size: 20, // 🎯 Explicit icon size
+                      size: 20,
                     ),
                   ),
                   label: 'Nhóm',
                 ),
                 BottomNavigationBarItem(
                   icon: Container(
-                    padding: const EdgeInsets.all(6), // 🎯 Smaller padding
+                    padding: const EdgeInsets.all(6),
                     decoration: _selectedIndex == 1
                         ? BoxDecoration(
                             color: Colors.white.withOpacity(0.2),
-                            borderRadius:
-                                BorderRadius.circular(10), // 🎯 Smaller radius
+                            borderRadius: BorderRadius.circular(10),
                           )
                         : null,
                     child: Icon(
                       _selectedIndex == 1
-                          ? Icons.swap_horiz
-                          : Icons.swap_horiz_outlined,
+                          ? Icons.inbox
+                          : Icons.inbox_outlined,
                       color: Colors.white,
-                      size: 20, // 🎯 Explicit icon size
+                      size: 20,
                     ),
                   ),
-                  label: 'Thanh toán',
+                  label: 'Yêu cầu',
                 ),
                 BottomNavigationBarItem(
                   icon: Container(
-                    padding: const EdgeInsets.all(6), // 🎯 Smaller padding
+                    padding: const EdgeInsets.all(6),
                     decoration: _selectedIndex == 2
                         ? BoxDecoration(
                             color: Colors.white.withOpacity(0.2),
-                            borderRadius:
-                                BorderRadius.circular(10), // 🎯 Smaller radius
+                            borderRadius: BorderRadius.circular(10),
                           )
                         : null,
                     child: Icon(
-                      _selectedIndex == 2 ? Icons.person : Icons.person_outline,
+                      _selectedIndex == 2
+                          ? Icons.notifications
+                          : Icons.notifications_outlined,
                       color: Colors.white,
-                      size: 20, // 🎯 Explicit icon size
+                      size: 20,
+                    ),
+                  ),
+                  label: 'Thông báo',
+                ),
+                BottomNavigationBarItem(
+                  icon: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: _selectedIndex == 3
+                        ? BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
+                          )
+                        : null,
+                    child: Icon(
+                      _selectedIndex == 3 ? Icons.person : Icons.person_outline,
+                      color: Colors.white,
+                      size: 20,
                     ),
                   ),
                   label: 'Tài khoản',

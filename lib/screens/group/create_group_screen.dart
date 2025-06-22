@@ -27,6 +27,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final _nameController = TextEditingController();
   final _budgetLimitController = TextEditingController();
   final _participantNameController = TextEditingController();
+  final _participantEmailController = TextEditingController();
 
   Future<List<Currency>>? _currenciesFuture;
   Future<List<Category>>? _categoriesFuture;
@@ -35,6 +36,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final List<Map<String, String>> _participants = [];
   String _participantRole = 'MEMBER';
   String? _creatorFullName;
+  String? _creatorEmail;
   bool _creatorAdded = false;
   bool _isSubmitting = false;
   List<Currency> _allCurrencies = [];
@@ -68,11 +70,14 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   Future<void> _initCreator() async {
     final fullName = await AuthService.getCurrentFullName();
+    final email = await AuthService.getCurrentEmail();
     if (fullName != null) {
       setState(() {
         _creatorFullName = fullName;
+        _creatorEmail = email;
         _participants.insert(0, {
           'name': fullName,
+          'email': email ?? '',
           'role': 'ADMIN',
           'isCreator': 'true',
         });
@@ -81,13 +86,42 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     }
   }
 
-  void _addParticipant() {
+  void _addParticipant() async {
     final name = _participantNameController.text.trim();
-    if (name.isNotEmpty) {
+    final email = _participantEmailController.text.trim();
+    if (name.isEmpty) return;
+
+    if (email.isNotEmpty) {
+      bool exists;
+      try {
+        exists = await AuthService.checkEmailExists(email);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi kiểm tra email: $e')),
+        );
+        return;
+      }
+
       setState(() {
-        _participants.add({'name': name, 'role': _participantRole});
+        _participants.add({'name': name, 'email': email, 'emailExists': exists.toString()});
         _participantNameController.clear();
-        _participantRole = 'MEMBER';
+        _participantEmailController.clear();
+      });
+
+      if (exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã thêm thành viên có tài khoản liên kết với email $email thành công.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Email $email chưa đăng ký hệ thống. Thành viên sẽ nhận được email mời tham gia nhóm sau khi nhóm được tạo.')),
+        );
+      }
+    } else {
+      setState(() {
+        _participants.add({'name': name});
+        _participantNameController.clear();
+        _participantEmailController.clear();
       });
     }
   }
@@ -249,8 +283,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
         'budgetLimit': _budgetLimitController.text.isNotEmpty
             ? int.tryParse(_budgetLimitController.text)
             : null,
+        'creatorName': _creatorFullName,
         'participants': _participants
-            .where((p) => p['isCreator'] != 'true') // bỏ người tạo
+            .where((p) => p['isCreator'] != 'true')
+            .map((p) => {
+              'name': p['name'],
+              if (p['email'] != null && p['email']!.isNotEmpty) 'email': p['email'],
+            })
             .toList(),
         'categoryId': _selectedCategory!.id,
       };
@@ -512,7 +551,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
-                      flex: 6,
+                      flex: 4,
                       child: TextField(
                         controller: _participantNameController,
                         textCapitalization: TextCapitalization.words,
@@ -526,35 +565,23 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                       ),
                     ),
                     const SizedBox(width: 6),
-
-                    // 🔥 Không Expanded nữa - chỉ cố định width
-                    SizedBox(
-                      width: 100, // chỉ 100 thôi
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _participantRole,
-                          onChanged: (v) {
-                            if (v != null) setState(() => _participantRole = v);
-                          },
-                          items: const [
-                            DropdownMenuItem(
-                                value: 'MEMBER',
-                                child: Text('MEMBER',
-                                    style: TextStyle(fontSize: 14))),
-                            DropdownMenuItem(
-                                value: 'ADMIN',
-                                child: Text('ADMIN',
-                                    style: TextStyle(fontSize: 14))),
-                          ],
-                          isExpanded:
-                              true, // 🔥 Cho Dropdown co gọn trong 100px
+                    Expanded(
+                      flex: 5,
+                      child: TextField(
+                        controller: _participantEmailController,
+                        decoration: const InputDecoration(
+                          hintText: 'Email (nếu có)',
+                          border: InputBorder.none,
+                          isCollapsed: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 8),
                         ),
+                        keyboardType: TextInputType.emailAddress,
+                        style: const TextStyle(fontSize: 16),
                       ),
                     ),
                     const SizedBox(width: 6),
-
                     SizedBox(
-                      width: 32, // 🔥 nhỏ nút + còn 32
+                      width: 32,
                       child: IconButton(
                         icon: const Icon(Icons.add_circle,
                             color: Colors.deepPurple, size: 22),
@@ -591,13 +618,16 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                       children: [
                         // Tên
                         Expanded(
-                          flex: 5,
+                          flex: 4,
                           child: TextFormField(
                             initialValue: p['name'],
                             onChanged: (value) {
                               _participants[index]['name'] = value;
+                              if (p['isCreator'] == 'true') {
+                                _creatorFullName = value;
+                              }
                             },
-                            readOnly: isCreator,
+                            readOnly: false,
                             decoration: const InputDecoration(
                               border: UnderlineInputBorder(),
                               isDense: true,
@@ -605,35 +635,23 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                           ),
                         ),
                         const SizedBox(width: 6),
-
-                        // Vai trò
+                        // Email
                         Expanded(
-                          flex: 3,
-                          child: DropdownButtonFormField<String>(
-                            value: p['role'],
-                            decoration: const InputDecoration(
-                              border: UnderlineInputBorder(),
+                          flex: 5,
+                          child: TextFormField(
+                            initialValue: p['email'] ?? '',
+                            readOnly: true,
+                            decoration: InputDecoration(
+                              border: const UnderlineInputBorder(),
                               isDense: true,
+                              hintText: (isCreator && (p['email'] == null || p['email']!.isEmpty)) ? '(Bạn)' : 'Email (nếu có)',
+                              hintStyle: isCreator
+                                  ? const TextStyle(color: Colors.blue, fontStyle: FontStyle.italic)
+                                  : null,
                             ),
-                            items: const [
-                              DropdownMenuItem(
-                                  value: 'MEMBER', child: Text('MEMBER')),
-                              DropdownMenuItem(
-                                  value: 'ADMIN', child: Text('ADMIN')),
-                            ],
-                            onChanged: isCreator
-                                ? null
-                                : (v) {
-                                    if (v != null) {
-                                      setState(() {
-                                        _participants[index]['role'] = v;
-                                      });
-                                    }
-                                  },
                           ),
                         ),
                         const SizedBox(width: 6),
-
                         // Action
                         SizedBox(
                           width: 36,

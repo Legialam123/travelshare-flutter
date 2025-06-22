@@ -14,7 +14,8 @@ import '../../utils/color_utils.dart';
 import '../../utils/icon_utils.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  final VoidCallback? onGroupDetailPop;
+  const HomeScreen({Key? key, this.onGroupDetailPop}) : super(key: key);
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -418,7 +419,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 onPressed: () {
                   if (_allGroups.isEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Bạn chưa có nhóm nào để lọc')),
+                      const SnackBar(
+                          content: Text('Bạn chưa có nhóm nào để lọc')),
                     );
                     return;
                   }
@@ -433,7 +435,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       body: _buildBody(),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       floatingActionButton: Container(
-        margin: const EdgeInsets.only(bottom: 20),
+        margin: const EdgeInsets.only(bottom: 4),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(22),
           gradient: const LinearGradient(
@@ -557,7 +559,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // 🎯 New: Flat group list for fallback
   Widget _buildFlatGroupList() {
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100), // 🎯 Bottom padding for navigation bar
+      padding: const EdgeInsets.fromLTRB(
+          16, 16, 16, 100), // 🎯 Bottom padding for navigation bar
       itemCount: _allGroups.length,
       itemBuilder: (context, index) {
         return Padding(
@@ -581,7 +584,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           .toList();
 
       return SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(0, 8, 0, 100), // 🎯 Bottom padding for navigation bar
+        padding: const EdgeInsets.fromLTRB(
+            0, 8, 0, 100), // 🎯 Bottom padding for navigation bar
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
@@ -645,7 +649,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min, // 🎯 Fit empty state content
+                    mainAxisSize:
+                        MainAxisSize.min, // 🎯 Fit empty state content
                     children: [
                       Icon(
                         Icons.group_outlined,
@@ -671,7 +676,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(0, 8, 0, 100), // 🎯 Bottom padding for navigation bar
+      padding: const EdgeInsets.fromLTRB(
+          0, 8, 0, 100), // 🎯 Bottom padding for navigation bar
       itemCount: entries.length,
       itemBuilder: (context, index) {
         final category = entries[index].key;
@@ -1001,8 +1007,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 );
-                if (result == true) {
-                  _loadGroupsByCategory();
+                // Luôn reload lại danh sách nhóm khi quay về
+                _loadGroupsByCategory();
+                if (widget.onGroupDetailPop != null) {
+                  widget.onGroupDetailPop!();
                 }
               },
               onLongPress: () {

@@ -219,17 +219,19 @@ class _EditGroupFormState extends State<EditGroupForm> {
                           await _uploadAvatar();
                           await _updateGroupInfo();
 
-                          if (widget.onUpdated != null) widget.onUpdated!();
-
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                    "✅ Chỉnh sửa thông tin nhóm thành công"),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                            Navigator.pop(context);
+                          if (widget.onUpdated != null) {
+                            widget.onUpdated!();
+                          } else {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      "✅ Chỉnh sửa thông tin nhóm thành công"),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                              Navigator.pop(context);
+                            }
                           }
                         }
                       },

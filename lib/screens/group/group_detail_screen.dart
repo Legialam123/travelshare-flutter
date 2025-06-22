@@ -698,7 +698,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   }
 
   void _loadGroupData() {
-    _groupFuture = GroupService.getGroupById(widget.groupId);
+    setState(() {
+      _groupFuture = GroupService.getGroupById(widget.groupId);
+    });
   }
 
   @override
@@ -1331,17 +1333,16 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               ),
             ),
             child: AppBar(
-              title: widget.groupName != null
+              title: /*widget.groupName != null
                   ? Text(widget.groupName!,
                       style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 20))
-                  : FutureBuilder<Group>(
+                  :*/ FutureBuilder<Group>(
                       future: _groupFuture,
                       builder: (context, snapshot) {
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
                           return const Text('Chi tiết nhóm',
                               style: TextStyle(
                                   color: Colors.white,
@@ -1408,8 +1409,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                       );
 
                       if (updated == true) {
-                        await _loadGroupDetail();
-                        _groupWasUpdated = true; // ✅ Ghi nhận có thay đổi
+                        _loadGroupData(); // Chỉ reload khi thực sự có cập nhật
+                        _groupWasUpdated = true;
                       }
                     } catch (e) {
                       ScaffoldMessenger.of(context).showSnackBar(

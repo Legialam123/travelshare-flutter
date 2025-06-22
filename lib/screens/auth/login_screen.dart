@@ -5,6 +5,7 @@ import '../../services/auth_service.dart';
 import '../../providers/auth_provider.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
+import 'package:flutter/services.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -95,6 +96,11 @@ class _LoginScreenState extends State<LoginScreen> {
         elevation: 0,
         centerTitle: false,
         titleSpacing: 0,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.white,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
         title: Padding(
           padding: const EdgeInsets.only(left: 12, top: 2),
           child: RichText(

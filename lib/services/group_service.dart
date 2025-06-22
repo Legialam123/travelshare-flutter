@@ -48,7 +48,10 @@ class GroupService {
   /// Lấy chi tiết một nhóm cụ thể
   static Future<Group> getGroupById(int groupId) async {
     try {
-      final response = await AuthService.dio.get('/group/$groupId');
+      final response = await AuthService.dio.get(
+        '/group/$groupId',
+        options: Options(headers: {'Cache-Control': 'no-cache'}),
+      );
       final data = response.data['result'];
       return Group.fromJson(data);
     } catch (e) {

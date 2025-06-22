@@ -36,6 +36,7 @@ class GroupManagementScreen extends StatefulWidget {
 class _GroupManagementScreenState extends State<GroupManagementScreen> {
   late Group group;
   bool _isLoading = false;
+  bool _wasUpdated = false;
 
   @override
   void initState() {
@@ -52,306 +53,330 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
-        child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF667eea), Color(0xFF764ba2)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: AppBar(
-            title: const Text("Quản lý nhóm", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
-            elevation: 0,
-            backgroundColor: Colors.transparent,
-            foregroundColor: Colors.white,
-            iconTheme: const IconThemeData(color: Colors.white),
-            systemOverlayStyle: const SystemUiOverlayStyle(
-              statusBarColor: Colors.white,
-              statusBarIconBrightness: Brightness.dark,
-              statusBarBrightness: Brightness.light,
-            ),
-            actions: [
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: Colors.white),
-                onSelected: (value) async {
-                  if (value == 'edit') {
-                    _showEditGroupModal(context);
-                  } else if (value == 'leave') {
-                    final lastAdmin = _isLastAdmin();
-                    if (lastAdmin) {
-                      // ❌ Nếu là Admin cuối cùng thì không cho rời
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content:
-                              Text('❌ Bạn là Admin cuối cùng, không thể rời nhóm!'),
-                        ),
-                      );
-                      return;
-                    }
+    // Sắp xếp danh sách thành viên: admin lên đầu, trong mỗi nhóm sắp xếp theo tên
+    final sortedParticipants = [
+      ...group.participants
+          .where((p) => p.role == 'ADMIN')
+          .toList()
+          ..sort((a, b) => a.name.compareTo(b.name)),
+      ...group.participants
+          .where((p) => p.role != 'ADMIN')
+          .toList()
+          ..sort((a, b) => a.name.compareTo(b.name)),
+    ];
 
-                    // ✅ Nếu còn Admin khác -> xác nhận rời
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Xác nhận rời khỏi nhóm'),
-                        content:
-                            const Text('Bạn có chắc chắn muốn rời khỏi nhóm này?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Huỷ'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red),
-                            child: const Text('Rời đi'),
-                          ),
-                        ],
-                      ),
-                    );
-
-                    if (confirm == true) {
-                      try {
-                        await AuthService.dio.delete('/group/${group.id}/leave');
+    return WillPopScope(
+      onWillPop: () async {
+        Navigator.pop(context, _wasUpdated);
+        return false;
+      },
+      child: Scaffold(
+        appBar: PreferredSize(
+          preferredSize: const Size.fromHeight(kToolbarHeight),
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: AppBar(
+              title: const Text("Quản lý nhóm", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+              elevation: 0,
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              iconTheme: const IconThemeData(color: Colors.white),
+              systemOverlayStyle: const SystemUiOverlayStyle(
+                statusBarColor: Colors.white,
+                statusBarIconBrightness: Brightness.dark,
+                statusBarBrightness: Brightness.light,
+              ),
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () {
+                  Navigator.pop(context, _wasUpdated);
+                },
+              ),
+              actions: [
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: Colors.white),
+                  onSelected: (value) async {
+                    if (value == 'edit') {
+                      _showEditGroupModal(context);
+                    } else if (value == 'leave') {
+                      final lastAdmin = _isLastAdmin();
+                      if (lastAdmin) {
+                        // ❌ Nếu là Admin cuối cùng thì không cho rời
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                              content: Text('🎉 Đã rời khỏi nhóm thành công!')),
+                            content:
+                                Text('❌ Bạn là Admin cuối cùng, không thể rời nhóm!'),
+                          ),
                         );
-                        Navigator.pop(context); // Đóng GroupManagementScreen
-                        Navigator.pop(context,
-                            true); // Đóng GroupDetailScreen (về HomeScreen)
-                      } catch (e) {
-                        String errorMessage = 'Lỗi không xác định khi rời nhóm';
-                        if (e is DioException && e.response?.data != null) {
-                          errorMessage =
-                              e.response?.data['message'] ?? errorMessage;
+                        return;
+                      }
+
+                      // ✅ Nếu còn Admin khác -> xác nhận rời
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Xác nhận rời khỏi nhóm'),
+                          content:
+                              const Text('Bạn có chắc chắn muốn rời khỏi nhóm này?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('Huỷ'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red),
+                              child: const Text('Rời đi'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (confirm == true) {
+                        try {
+                          await AuthService.dio.delete('/group/${group.id}/leave');
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('🎉 Đã rời khỏi nhóm thành công!')),
+                          );
+                          Navigator.pop(context); // Đóng GroupManagementScreen
+                          Navigator.pop(context,
+                              true); // Đóng GroupDetailScreen (về HomeScreen)
+                        } catch (e) {
+                          String errorMessage = 'Lỗi không xác định khi rời nhóm';
+                          if (e is DioException && e.response?.data != null) {
+                            errorMessage =
+                                e.response?.data['message'] ?? errorMessage;
+                          }
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('❌ $errorMessage')),
+                          );
                         }
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('❌ $errorMessage')),
-                        );
                       }
                     }
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Text('✏️ Sửa thông tin nhóm'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'leave',
-                    child: Text('🚪 Rời khỏi nhóm'),
-                  ),
-                ],
-              ),
-            ],
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('✏️ Sửa thông tin nhóm'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'leave',
+                      child: Text('🚪 Rời khỏi nhóm'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // PHẦN A - Thông tin nhóm
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 32,
-                            backgroundImage: group.avatarUrl != null &&
-                                    group.avatarUrl!.startsWith('http')
-                                ? NetworkImage(group.avatarUrl!)
-                                : AssetImage(group.avatarUrl!) as ImageProvider,
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        group.name,
-                                        style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              // PHẦN A - Thông tin nhóm
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Card(
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 32,
+                              backgroundImage: group.avatarUrl != null &&
+                                      group.avatarUrl!.startsWith('http')
+                                  ? NetworkImage(group.avatarUrl!)
+                                  : AssetImage(group.avatarUrl!) as ImageProvider,
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          group.name,
+                                          style: const TextStyle(
+                                            fontSize: 20,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
                                       ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  // Hiển thị danh mục
+                                  if (group.category != null)
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          getIconDataFromCode(
+                                              group.category!.iconCode),
+                                          size: 18,
+                                          color: HexColor.fromHex(
+                                              group.category!.color ?? '#000000'),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          group.category!.name,
+                                          style: const TextStyle(fontSize: 16),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                // Hiển thị danh mục
-                                if (group.category != null)
+                                  const SizedBox(height: 4),
                                   Row(
                                     children: [
-                                      Icon(
-                                        getIconDataFromCode(
-                                            group.category!.iconCode),
-                                        size: 18,
-                                        color: HexColor.fromHex(
-                                            group.category!.color ?? '#000000'),
-                                      ),
+                                      Icon(Icons.monetization_on,
+                                          size: 18, color: Colors.green),
                                       const SizedBox(width: 4),
                                       Text(
-                                        group.category!.name,
+                                        '${group.budgetLimit ?? 0} ${group.defaultCurrency}',
                                         style: const TextStyle(fontSize: 16),
                                       ),
                                     ],
                                   ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    Icon(Icons.monetization_on,
-                                        size: 18, color: Colors.green),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '${group.budgetLimit ?? 0} ${group.defaultCurrency}',
-                                      style: const TextStyle(fontSize: 16),
-                                    ),
-                                  ],
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.calendar_today,
+                                          size: 18, color: Colors.blue),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        DateFormat('dd/MM/yyyy')
+                                            .format(group.createdAt),
+                                        style: const TextStyle(fontSize: 16),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (widget.isAdmin) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            margin: const EdgeInsets.only(top: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.deepPurple[50],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.vpn_key,
+                                    size: 20, color: Colors.deepPurple),
+                                const SizedBox(width: 8),
+                                Text(
+                                  "Mã tham gia: ",
+                                  style: TextStyle(
+                                      fontSize: 16, color: Colors.grey[700]),
                                 ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    Icon(Icons.calendar_today,
-                                        size: 18, color: Colors.blue),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      DateFormat('dd/MM/yyyy')
-                                          .format(group.createdAt),
-                                      style: const TextStyle(fontSize: 16),
-                                    ),
-                                  ],
+                                Text(
+                                  group.joinCode,
+                                  style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.deepPurple),
                                 ),
                               ],
                             ),
                           ),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      if (widget.isAdmin) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          margin: const EdgeInsets.only(top: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.deepPurple[50],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.vpn_key,
-                                  size: 20, color: Colors.deepPurple),
-                              const SizedBox(width: 8),
-                              Text(
-                                "Mã tham gia: ",
-                                style: TextStyle(
-                                    fontSize: 16, color: Colors.grey[700]),
-                              ),
-                              Text(
-                                group.joinCode,
-                                style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.deepPurple),
-                              ),
-                            ],
-                          ),
-                        ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            // PHẦN B - Danh sách thành viên
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        "Thành viên",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 18),
-                      ),
-                      if (widget.isAdmin)
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            showModalBottomSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              builder: (_) => AddParticipantForm(
-                                groupId: group.id,
-                                onSuccess: _reloadGroup,
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.person_add),
-                          label: const Text("Thêm"),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                            textStyle: const TextStyle(fontSize: 14),
+              // PHẦN B - Danh sách thành viên
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "Thành viên",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 18),
+                        ),
+                        if (widget.isAdmin)
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                builder: (_) => AddParticipantForm(
+                                  groupId: group.id,
+                                  onSuccess: _reloadGroup,
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.person_add),
+                            label: const Text("Thêm"),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              textStyle: const TextStyle(fontSize: 14),
+                            ),
                           ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ...sortedParticipants.map((p) {
+                      final isCurrentUser = p.user?.id.toString() == widget.currentUserId;
+                      return Card(
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.blue[100],
+                            child: Text(p.name[0]),
+                          ),
+                          title: Text(p.name),
+                          subtitle: Text("${p.role}${isCurrentUser ? ' (Bạn)' : ''} - ${p.status}"),
+                          trailing: isCurrentUser
+                              ? const Icon(Icons.chevron_right)
+                              : (p.user == null && widget.isAdmin
+                              ? TextButton(
+                                      onPressed: () => _showInviteDialog(context, p.id),
+                                  child: const Text("📧 Mời"))
+                                  : null),
+                          onTap: null,
+                          onLongPress: widget.isAdmin || isCurrentUser
+                              ? () => _showActions(context, p, isCurrentUser: isCurrentUser)
+                              : null,
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ...group.participants.map((p) {
-                    final isCurrentUser =
-                        p.user?.id.toString() == widget.currentUserId;
-                    return Card(
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.blue[100],
-                          child: Text(p.name[0]),
-                        ),
-                        title: Text(p.name),
-                        subtitle: Text(
-                            "${p.role}${isCurrentUser ? ' (Bạn)' : ''} - ${p.status}"),
-                        trailing: p.user == null && widget.isAdmin
-                            ? TextButton(
-                                onPressed: () =>
-                                    _showInviteDialog(context, p.id),
-                                child: const Text("📧 Mời"))
-                            : null,
-                        onLongPress: widget.isAdmin
-                            ? () => _showActions(context, p)
-                            : null,
-                      ),
-                    );
-                  }).toList(),
-                ],
+                      );
+                    }).toList(),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -428,18 +453,32 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
           setState(() {
             group = updatedGroup;
           });
-          Navigator.pop(context, true);
+          _wasUpdated = true;
+          if (context.mounted) {
+            Navigator.pop(context, true);
+          }
         },
       ),
     );
   }
 
-  void _showActions(BuildContext context, GroupParticipant participant) {
+  void _showActions(BuildContext context, GroupParticipant participant, {bool isCurrentUser = false}) {
+    final isCurrentUserAdmin = isCurrentUser && participant.role == 'ADMIN';
     showModalBottomSheet(
       context: context,
       builder: (_) => SafeArea(
         child: Wrap(
           children: [
+            if (isCurrentUser)
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Đổi tên hiển thị'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showChangeNameDialog(context, participant);
+                },
+              ),
+            if (widget.isAdmin) ...[
             ListTile(
               leading: const Icon(Icons.swap_horiz),
               title: Text(participant.role == 'ADMIN'
@@ -450,6 +489,7 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
                 await _changeRole(participant);
               },
             ),
+              if (!isCurrentUserAdmin)
             ListTile(
               leading:
                   const Icon(Icons.remove_circle_outline, color: Colors.red),
@@ -460,6 +500,7 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
                 await _removeParticipant(participant);
               },
             ),
+            ],
           ],
         ),
       ),
@@ -605,5 +646,51 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
         SnackBar(content: Text('Lỗi tải danh mục: $e')),
       );
     }
+  }
+
+  void _showChangeNameDialog(BuildContext context, GroupParticipant participant) {
+    final controller = TextEditingController(text: participant.name);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Đổi tên hiển thị'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Tên mới'),
+        ),
+        actions: [
+          TextButton(
+            child: const Text('Huỷ'),
+            onPressed: () => Navigator.pop(context),
+          ),
+          ElevatedButton(
+            child: const Text('Lưu'),
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isEmpty) return;
+              Navigator.pop(context);
+              try {
+                await AuthService.dio.put(
+                  '/group/${group.id}/participant/${participant.id}/update_name',
+                  data: {
+                    'groupId': group.id,
+                    'participantId': participant.id,
+                    'newName': newName,
+                  },
+                );
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Đã đổi tên thành công!')),
+                );
+                await _reloadGroup();
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('❌ Lỗi đổi tên: $e')),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 }
