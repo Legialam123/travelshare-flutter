@@ -13,6 +13,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/auth_service.dart';
 import 'edit_profile_screen.dart';
 import 'change_password_screen.dart';
+import 'user_statistics_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -495,9 +496,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                                 ],
                               ),
 
-                        const SizedBox(height: 40),
+                        const SizedBox(height: 16),
 
-                        // 🎯 Menu Items - No Card Container
+                        // Menu tile Thông tin cá nhân
                         _buildMenuTile(
                           icon: Icons.person_outline,
                           title: 'Thông tin cá nhân',
@@ -515,6 +516,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                           },
                         ),
 
+                        // Menu tile Thống kê cá nhân
+                        _buildMenuTile(
+                          icon: Icons.bar_chart,
+                          title: 'Thống kê cá nhân',
+                          subtitle: 'Tổng quan chi tiêu, hoạt động của bạn',
+                          color: const Color(0xFF667eea),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const UserStatisticsScreen()),
+                            );
+                          },
+                        ),
+
+                        // Menu tile Đổi mật khẩu
                         _buildMenuTile(
                           icon: Icons.lock_outline,
                           title: 'Đổi mật khẩu',
@@ -523,6 +539,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                           onTap: _onChangePassword,
                         ),
 
+                        // Menu tile Xoá tài khoản
                         _buildMenuTile(
                           icon: Icons.delete_forever_outlined,
                           title: 'Xoá tài khoản',
