@@ -14,6 +14,7 @@ import '../../services/auth_service.dart';
 import '../../services/group_service.dart';
 import '../../utils/color_utils.dart';
 import '../../utils/icon_utils.dart';
+import '../../widgets/currency_picker_modal.dart';
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({Key? key}) : super(key: key);
@@ -25,7 +26,6 @@ class CreateGroupScreen extends StatefulWidget {
 class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _budgetLimitController = TextEditingController();
   final _participantNameController = TextEditingController();
   final _participantEmailController = TextEditingController();
 
@@ -126,115 +126,17 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     }
   }
 
-  void _showCurrencySelectorModal(BuildContext context) async {
-    final selected = await showModalBottomSheet<Currency>(
+  void _showCurrencyPicker(BuildContext context) async {
+    final selected = await CurrencyPickerModal.showShortList(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        List<Currency> filtered = [..._allCurrencies];
-        final searchController = TextEditingController();
-
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            void _filter(String query) {
-              setModalState(() {
-                filtered = _allCurrencies
-                    .where((c) =>
-                        c.name.toLowerCase().contains(query.toLowerCase()) ||
-                        c.code.toLowerCase().contains(query.toLowerCase()))
-                    .toList();
-              });
-            }
-
-            return Padding(
-              padding: MediaQuery.of(ctx).viewInsets,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    child: TextField(
-                      controller: searchController,
-                      onChanged: _filter,
-                      decoration: InputDecoration(
-                        hintText: 'Tìm kiếm tiền tệ...',
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final c = filtered[index];
-                        final isSelected = _selectedCurrency?.code == c.code;
-
-                        return ListTile(
-                          title: Text('${c.name} (${c.symbol})'),
-                          trailing: isSelected
-                              ? const Icon(Icons.check, color: Colors.green)
-                              : null,
-                          onTap: () {
-                            Navigator.pop(context, c); // Trả về currency chọn
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+      currencies: _allCurrencies,
+      selectedCurrency: _selectedCurrency,
+      defaultCurrencyCode: null, // Group creation doesn't have default yet
     );
 
-    // Sau khi chọn xong:
     if (selected != null) {
       setState(() => _selectedCurrency = selected);
     }
-  }
-
-  void _showCurrencyShortList(BuildContext context) {
-    showModalBottomSheet<Currency>(
-      context: context,
-      builder: (ctx) {
-        final shortList = _allCurrencies.take(5).toList();
-
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...shortList.map((c) => ListTile(
-                    title: Text('${c.name} (${c.symbol})'),
-                    trailing: _selectedCurrency?.code == c.code
-                        ? const Icon(Icons.check, color: Colors.green)
-                        : null,
-                    onTap: () {
-                      Navigator.pop(context); // đóng mini modal
-                      setState(() => _selectedCurrency = c);
-                    },
-                  )),
-              const Divider(),
-              ListTile(
-                leading:
-                    const Icon(Icons.arrow_drop_down, color: Colors.orange),
-                title: const Text("Hiển thị tất cả tiền tệ"),
-                onTap: () {
-                  Navigator.pop(context); // đóng rút gọn
-                  _showCurrencySelectorModal(context); // mở full list
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
   }
 
   void _removeParticipant(int index) {
@@ -280,9 +182,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       final Map<String, dynamic> groupData = {
         'name': _nameController.text.trim(),
         'defaultCurrency': _selectedCurrency!.code,
-        'budgetLimit': _budgetLimitController.text.isNotEmpty
-            ? int.tryParse(_budgetLimitController.text)
-            : null,
         'creatorName': _creatorFullName,
         'participants': _participants
             .where((p) => p['isCreator'] != 'true')
@@ -441,21 +340,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     value == null || value.isEmpty ? 'Nhập tên nhóm' : null,
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _budgetLimitController,
-                keyboardType: TextInputType.number,
-                decoration:
-                    const InputDecoration(labelText: 'Ngân sách dự kiến'),
-                validator: (value) {
-                  if (value != null &&
-                      value.isNotEmpty &&
-                      int.tryParse(value) == null) {
-                    return 'Vui lòng nhập số hợp lệ';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
+
 
               // Phần chọn danh mục
               FutureBuilder<List<Category>>(
@@ -514,7 +399,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   }
 
                   return InkWell(
-                    onTap: () => _showCurrencyShortList(context),
+                    onTap: () => _showCurrencyPicker(context),
                     child: InputDecorator(
                       decoration: const InputDecoration(labelText: 'Tiền tệ'),
                       child: Row(

@@ -20,6 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _rememberMe = false;
+  bool _showPassword = false;
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
@@ -62,9 +63,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } else {
         final message = data['message'] ?? 'Đăng nhập thất bại!';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
       }
     } catch (e) {
       String errorMessage = 'Lỗi kết nối hoặc đăng nhập!';
@@ -80,9 +83,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ $errorMessage')),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ $errorMessage')),
+        );
+      }
     } finally {
       setState(() => _isLoading = false);
     }
@@ -105,7 +110,10 @@ class _LoginScreenState extends State<LoginScreen> {
           padding: const EdgeInsets.only(left: 12, top: 2),
           child: RichText(
             text: TextSpan(
-              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold, fontFamily: 'Montserrat'),
+              style: const TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Montserrat'),
               children: [
                 TextSpan(
                   text: 'i',
@@ -164,12 +172,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+                  children: [
                     const Text(
                       'Đăng nhập',
                       style: TextStyle(
@@ -180,40 +188,48 @@ class _LoginScreenState extends State<LoginScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-                TextFormField(
-                  controller: _usernameController,
+                    TextFormField(
+                      controller: _usernameController,
                       decoration: const InputDecoration(
                         labelText: 'Tên đăng nhập',
                         prefixIcon: Icon(Icons.person_outline),
                       ),
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'Vui lòng nhập tên đăng nhập'
-                      : null,
-                ),
+                      validator: (value) => value == null || value.isEmpty
+                          ? 'Vui lòng nhập tên đăng nhập'
+                          : null,
+                    ),
                     const SizedBox(height: 18),
-                TextFormField(
-                  controller: _passwordController,
-                      decoration: const InputDecoration(
+                    TextFormField(
+                      controller: _passwordController,
+                      decoration: InputDecoration(
                         labelText: 'Mật khẩu',
                         prefixIcon: Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(_showPassword ? Icons.visibility : Icons.visibility_off),
+                          onPressed: () {
+                            setState(() {
+                              _showPassword = !_showPassword;
+                            });
+                          },
+                        ),
                       ),
-                  obscureText: true,
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'Vui lòng nhập mật khẩu'
-                      : null,
-                ),
-                    const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _rememberMe,
-                      onChanged: (value) =>
-                          setState(() => _rememberMe = value ?? false),
+                      obscureText: !_showPassword,
+                      validator: (value) => value == null || value.isEmpty
+                          ? 'Vui lòng nhập mật khẩu'
+                          : null,
                     ),
-                    const Text('Ghi nhớ tôi'),
-                  ],
-                ),
-                const SizedBox(height: 24),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: _rememberMe,
+                          onChanged: (value) =>
+                              setState(() => _rememberMe = value ?? false),
+                        ),
+                        const Text('Ghi nhớ tôi'),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
                     Center(
                       child: Container(
                         decoration: BoxDecoration(
@@ -235,17 +251,19 @@ class _LoginScreenState extends State<LoginScreen> {
                             borderRadius: BorderRadius.circular(15),
                             onTap: _isLoading ? null : _login,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 32, vertical: 14),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white),
+                                    )
                                   : Row(
                                       mainAxisSize: MainAxisSize.min,
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: const [
                                         Icon(Icons.login, color: Colors.white),
                                         SizedBox(width: 10),
@@ -262,37 +280,37 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                  ),
-                ),
+                      ),
+                    ),
                     const SizedBox(height: 24),
-                TextButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const RegisterScreen(),
-                            ),
-                          );
-                        },
-                  child: const Text('Bạn chưa có tài khoản? Đăng ký'),
-                ),
-                TextButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  const ForgotPasswordScreen(),
-                            ),
-                          );
-                        },
-                  child: const Text('Quên mật khẩu?'),
-                ),
-              ],
+                    TextButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const RegisterScreen(),
+                                ),
+                              );
+                            },
+                      child: const Text('Bạn chưa có tài khoản? Đăng ký'),
+                    ),
+                    TextButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const ForgotPasswordScreen(),
+                                ),
+                              );
+                            },
+                      child: const Text('Quên mật khẩu?'),
+                    ),
+                  ],
                 ),
               ),
             ),

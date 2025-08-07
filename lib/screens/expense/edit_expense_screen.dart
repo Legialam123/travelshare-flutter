@@ -10,9 +10,16 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/category_service.dart';
 import '../../../models/category.dart';
+import '../../../models/currency.dart'; // 🔧 Thêm import Currency
+import '../../../services/currency_service.dart'; // 🔧 Thêm import CurrencyService
 import '../../../utils/color_utils.dart';
 import '../../../utils/icon_utils.dart';
+import '../../../utils/currency_formatter.dart';
 import 'package:flutter/services.dart';
+import '../../widgets/amount_text_field.dart';
+import '../../utils/amount_parser.dart';
+import '../../utils/currency_input_formatter.dart'; // 🔧 Thêm import CurrencyInputFormatter
+import '../../widgets/currency_picker_modal.dart'; // 🔧 Thêm import CurrencyPickerModal
 
 int? _groupId;
 
@@ -44,6 +51,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
 
   List<Map<String, dynamic>> _participants = [];
   List<Category> _categories = [];
+  List<Currency> _currencies = []; // 🔧 Thêm currencies list
   List<Map<String, dynamic>> _splits = [];
 
   // 🎯 Smart split management
@@ -51,20 +59,30 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
   Map<int, Map<String, dynamic>> _currentSplitData = {};
   bool _hasUserModifications = false;
 
-  // 🔧 Smart Auto-Recalculation
+  //Smart Auto-Recalculation
   Timer? _amountRecalculationTimer;
   double _lastProcessedAmount = 0.0;
 
-  // 🎯 Backup original ratios để restore khi cần
+  //Backup original ratios để restore khi cần
   List<double> _originalRatios = [];
   bool _hasOriginalRatios = false;
 
   String? _selectedCategoryId;
   int? _selectedPayerId;
   String _splitType = 'EQUAL';
+  // 🔧 Thay đổi từ hardcode VND sang dynamic currency
+  Currency? _selectedCurrency;
+  String? _groupDefaultCurrencyCode;
 
   List<Map<String, dynamic>> _existingAttachments = [];
   List<XFile> _newAttachments = [];
+
+  // 🎯 Multi-currency tracking from backend
+  double? _currentExchangeRate;
+  bool _isLoadingExchangeRate = false;
+  double? _backendConvertedAmount; // Converted amount from backend
+  Currency? _backendConvertedCurrency; // Converted currency from backend
+  bool _isMultiCurrency = false; // Whether this expense has conversion
 
   @override
   void initState() {
@@ -96,7 +114,6 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       _groupId = result['group']['id'];
       _titleController.text = result['title'] ?? '';
       _descriptionController.text = result['description'] ?? '';
-      _amountController.text = (result['amount'] ?? '').toString();
       _selectedDate = DateTime.parse(result['expenseDate']);
       _selectedPayerId = result['payer']['id'];
       _splitType = result['splitType'] ?? 'EQUAL';
@@ -105,6 +122,56 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       _participants = List<Map<String, dynamic>>.from(
           result['group']['participants'] ?? []);
       _splits = List<Map<String, dynamic>>.from(result['splits'] ?? []);
+
+      // 🎯 Load currencies và group default currency
+      await _loadCurrenciesAndGroupDefault();
+
+      // 🎯 Load multi-currency data from backend
+      final expenseOriginalCurrency = result['originalCurrency'];
+      final expenseOriginalAmount = result['originalAmount'] ?? result['amount'] ?? 0.0; // Fallback for legacy data
+      final expenseConvertedCurrency = result['convertedCurrency'];
+      final expenseConvertedAmount = result['convertedAmount'];
+      final expenseExchangeRate = result['exchangeRate'];
+      _isMultiCurrency = result['isMultiCurrency'] ?? false;
+      
+      // Store backend converted data
+      _backendConvertedAmount = expenseConvertedAmount?.toDouble();
+      if (expenseConvertedCurrency != null) {
+        _backendConvertedCurrency = _currencies.firstWhere(
+          (c) => c.code == expenseConvertedCurrency['code'],
+          orElse: () => Currency(id: 0, code: expenseConvertedCurrency['code'], name: 'Unknown', symbol: ''),
+        );
+      }
+      if (expenseExchangeRate != null) {
+        _currentExchangeRate = expenseExchangeRate.toDouble();
+      }
+      
+      if (expenseOriginalCurrency != null) {
+        _selectedCurrency = _currencies.firstWhere(
+          (c) => c.code == expenseOriginalCurrency['code'],
+          orElse: () => _currencies.firstWhere((c) => c.code == 'VND',
+              orElse: () => _currencies.first),
+        );
+      } else {
+        // Fallback for legacy data - use group default
+        final groupDefaultCurrencyCode = _groupDefaultCurrencyCode ?? 'VND';
+        _selectedCurrency = _currencies.firstWhere(
+          (c) => c.code == groupDefaultCurrencyCode,
+          orElse: () => _currencies.firstWhere((c) => c.code == 'VND',
+              orElse: () => _currencies.first),
+        );
+      }
+
+      // 🎯 Format originalAmount with proper currency context
+      if (_selectedCurrency != null) {
+        final formattedAmount = CurrencyInputFormatter.formatCurrency(
+          expenseOriginalAmount, 
+          _selectedCurrency!.code
+        );
+        _amountController.text = formattedAmount;
+      } else {
+        _amountController.text = expenseOriginalAmount.toString();
+      }
 
       setState(() => _loading = false);
       await _loadCategories();
@@ -118,14 +185,195 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
         _currentSplitData[i] = Map.from(_splits[i]);
       }
 
-      // 🔧 Initialize last processed amount
-      _lastProcessedAmount = double.tryParse(_amountController.text) ?? 0.0;
+      // 🔧 Initialize last processed amount với formatted value
+      _lastProcessedAmount = expenseOriginalAmount;
 
       _backupOriginalRatios();
+
+      // 🔧 Load exchange rate if needed
+      await _loadExchangeRateIfNeeded();
     } catch (e) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Lỗi tải dữ liệu: $e')));
       Navigator.pop(context);
+    }
+  }
+
+  // 🔧 Thêm method để load currencies và group default currency
+  Future<void> _loadCurrenciesAndGroupDefault() async {
+    try {
+      final results = await Future.wait([
+        CurrencyService.fetchCurrencies(),
+        _loadGroupDefaultCurrency(),
+      ]);
+      
+      _currencies = results[0] as List<Currency>;
+    } catch (e) {
+      print('Warning: Could not load currencies: $e');
+      // Fallback: create basic VND currency
+      _currencies = [
+        Currency(id: 1, code: 'VND', name: 'Vietnamese Dong', symbol: '₫'),
+      ];
+    }
+  }
+
+  // 🔧 Thêm method để load group default currency
+  Future<void> _loadGroupDefaultCurrency() async {
+    try {
+      if (_groupId != null) {
+        final res = await AuthService.dio.get('/group/$_groupId');
+        final group = res.data['result'];
+        _groupDefaultCurrencyCode = group['defaultCurrency'];
+      }
+    } catch (e) {
+      print('Warning: Could not load group default currency: $e');
+    }
+  }
+
+  // 🔧 Thêm method để load exchange rate
+  Future<void> _loadExchangeRateIfNeeded() async {
+    if (_selectedCurrency != null &&
+        _groupDefaultCurrencyCode != null &&
+        _selectedCurrency!.code != _groupDefaultCurrencyCode) {
+      print(
+          '🔄 Loading exchange rate: ${_selectedCurrency!.code} → $_groupDefaultCurrencyCode');
+
+      final rate = await _fetchExchangeRate(
+          _selectedCurrency!.code, _groupDefaultCurrencyCode!);
+
+      if (rate != null) {
+        print(
+            '✅ Exchange rate loaded: 1 ${_selectedCurrency!.code} = $rate $_groupDefaultCurrencyCode');
+      } else {
+        print('❌ Failed to load exchange rate');
+      }
+
+      setState(() => _currentExchangeRate = rate);
+    } else {
+      print('ℹ️ Same currency selected, no conversion needed');
+      setState(() => _currentExchangeRate = null);
+    }
+  }
+
+  // 🔧 Thêm method để fetch exchange rate (copy từ add_expense)
+  Future<double?> _fetchExchangeRate(
+      String fromCurrency, String toCurrency) async {
+    if (fromCurrency == toCurrency) return 1.0;
+
+    try {
+      setState(() => _isLoadingExchangeRate = true);
+
+      final response = await AuthService.dio.get(
+        '/exchange/rate',
+        queryParameters: {
+          'from': fromCurrency,
+          'to': toCurrency,
+        },
+      );
+
+      if (response.statusCode == 200 && response.data['result'] != null) {
+        final result = response.data['result'];
+
+        if (result['success'] == true || result['isSuccess'] == true) {
+          final rate = result['rate'] as double?;
+          return rate;
+        } else {
+          final errorMessage = result['errorMessage'] ?? 'Unknown error';
+          print('❌ API Exchange Rate Error: $errorMessage');
+          return _getMockExchangeRate(fromCurrency, toCurrency);
+        }
+      } else {
+        print('❌ API Response Error: ${response.statusCode}');
+        return _getMockExchangeRate(fromCurrency, toCurrency);
+      }
+    } catch (e) {
+      print('❌ Lỗi khi lấy tỷ giá: $e');
+      return _getMockExchangeRate(fromCurrency, toCurrency);
+    } finally {
+      setState(() => _isLoadingExchangeRate = false);
+    }
+  }
+
+  // 🔧 Thêm mock exchange rates (copy từ add_expense)
+  double? _getMockExchangeRate(String fromCurrency, String toCurrency) {
+    print('🔄 Sử dụng mock exchange rate: $fromCurrency → $toCurrency');
+
+    final mockRates = {
+      'USD': 1.0,
+      'VND': 24500.0,
+      'EUR': 0.92,
+      'GBP': 0.79,
+      'JPY': 149.0,
+      'CNY': 7.25,
+      'KRW': 1320.0,
+      'THB': 36.0,
+      'SGD': 1.36,
+      'MYR': 4.68,
+      'IDR': 15600.0,
+      'PHP': 56.0,
+      'AUD': 1.53,
+      'CAD': 1.37,
+      'CHF': 0.89,
+    };
+
+    final fromRate = mockRates[fromCurrency];
+    final toRate = mockRates[toCurrency];
+
+    if (fromRate != null && toRate != null) {
+      final rate = toRate / fromRate;
+      print('📊 Mock Rate: 1 $fromCurrency = $rate $toCurrency');
+      return rate;
+    }
+
+    print('⚠️ Không tìm thấy mock rate cho $fromCurrency → $toCurrency');
+    return null;
+  }
+
+  // 🎯 Get converted amount text using backend data
+  String _getConvertedAmountText() {
+    if (!_isMultiCurrency || _backendConvertedAmount == null || _backendConvertedCurrency == null) {
+      return '';
+    }
+
+    final originalAmount = _selectedCurrency != null
+        ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0.0
+        : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0.0;
+
+    if (originalAmount == 0) return '';
+
+    // Show conversion using backend data
+    final originalFormatted = CurrencyFormatter.formatMoney(originalAmount, _selectedCurrency!.code);
+    final convertedFormatted = CurrencyFormatter.formatMoney(_backendConvertedAmount!, _backendConvertedCurrency!.code);
+    
+    return '$originalFormatted → $convertedFormatted';
+  }
+
+  // 🔧 Thêm method để show currency picker
+  void _showCurrencyPicker(BuildContext context) async {
+    final selected = await CurrencyPickerModal.showShortList(
+      context: context,
+      currencies: _currencies,
+      selectedCurrency: _selectedCurrency,
+      defaultCurrencyCode: _groupDefaultCurrencyCode,
+    );
+
+    if (selected != null) {
+      // Re-format existing amount với currency mới
+      final currentValue = _selectedCurrency != null
+          ? AmountParser.getPureDouble(
+              _amountController.text, _selectedCurrency!.code)
+          : CurrencyInputFormatter.extractNumber(_amountController.text);
+
+      setState(() => _selectedCurrency = selected);
+
+      // Re-format amount với currency mới
+      if (currentValue != null && currentValue > 0) {
+        final formattedValue =
+            CurrencyInputFormatter.formatCurrency(currentValue, selected.code);
+        _amountController.text = formattedValue;
+      }
+
+      _loadExchangeRateIfNeeded(); // Load exchange rate khi currency thay đổi
     }
   }
 
@@ -173,8 +421,10 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
 
     if (_splitType == 'AMOUNT') {
       final total = _splits.fold(0.0, (sum, s) => sum + (s['amount'] ?? 0));
-      if (total.toStringAsFixed(2) !=
-          double.parse(_amountController.text).toStringAsFixed(2)) {
+      final expectedAmount = _selectedCurrency != null
+          ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+          : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
+      if (total.toStringAsFixed(2) != expectedAmount.toStringAsFixed(2)) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Tổng số tiền chia không khớp.')));
         return;
@@ -226,11 +476,14 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       final data = {
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
-        'amount': double.parse(_amountController.text.trim()),
+        'amount': _selectedCurrency != null
+            ? AmountParser.getPureDouble(_amountController.text.trim(), _selectedCurrency!.code) ?? 0
+            : CurrencyInputFormatter.extractNumber(_amountController.text.trim()) ?? 0,
         'participantId': _selectedPayerId,
         'category': int.parse(_selectedCategoryId!),
         'expenseDate': _selectedDate.toIso8601String(),
         'splitType': _splitType,
+        'currency': _selectedCurrency?.code ?? 'VND', // 🔧 Gửi currency code
         'splits': _splitType == 'EQUAL'
             ? _splits
                 .map((s) => {
@@ -253,6 +506,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       print('=== EXPENSE UPDATE SUBMIT DEBUG ===');
       print('Split Type: $_splitType');
       print('Amount: ${_amountController.text}');
+      print('Currency: ${_selectedCurrency?.code}');
       print('Last Processed Amount: $_lastProcessedAmount');
       print('Has User Modifications: $_hasUserModifications');
       print('Splits Data sent to backend:');
@@ -264,6 +518,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       print('Full data object:');
       print('  Title: ${data['title']}');
       print('  Amount: ${data['amount']}');
+      print('  Currency: ${data['currency']}');
       print('  SplitType: ${data['splitType']}');
       print('  ParticipantId: ${data['participantId']}');
       print('  Category: ${data['category']}');
@@ -400,7 +655,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       return Colors.red;
     } else if (_splitType == 'AMOUNT') {
       final total = _calculateTotalAmount();
-      final expected = double.tryParse(_amountController.text) ?? 0;
+      final expected = _selectedCurrency != null
+          ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+          : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
       if ((total - expected).abs() < 0.01) return Colors.green;
       return Colors.red;
     }
@@ -411,7 +668,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
   void _convertSplitType(String newSplitType) {
     if (_splitType == newSplitType) return;
 
-    final currentAmount = double.tryParse(_amountController.text) ?? 0.0;
+    final currentAmount = _selectedCurrency != null
+        ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0.0
+        : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0.0;
 
     // 🔍 DEBUG LOGGING - Log split type conversion
     print('=== SPLIT TYPE CONVERSION DEBUG ===');
@@ -442,7 +701,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
             if (oldSplitType == 'PERCENTAGE') {
               final currentPercentage =
                   split['percentage'] ?? 0.0; // 🔧 Fallback cho null
-              final totalAmount = double.tryParse(_amountController.text) ?? 0;
+              final totalAmount = _selectedCurrency != null
+                  ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+                  : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
               split['amount'] = (currentPercentage / 100.0) * totalAmount;
             } else if (oldSplitType == 'EQUAL') {
               // 🔧 Chuyển từ EQUAL → Restore original ratios
@@ -458,7 +719,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
             if (oldSplitType == 'AMOUNT') {
               final currentAmount =
                   split['amount'] ?? 0.0; // 🔧 Fallback cho null
-              final totalAmount = double.tryParse(_amountController.text) ?? 0;
+              final totalAmount = _selectedCurrency != null
+                  ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+                  : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
               if (totalAmount > 0) {
                 split['percentage'] = (currentAmount / totalAmount) * 100.0;
               }
@@ -477,7 +740,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       }
 
       // 🔧 Đồng bộ _lastProcessedAmount với current amount
-      _lastProcessedAmount = double.tryParse(_amountController.text) ?? 0.0;
+      _lastProcessedAmount = _selectedCurrency != null
+          ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0.0
+          : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0.0;
     });
 
     // 🔍 DEBUG LOGGING - Log after conversion
@@ -525,7 +790,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
   }
 
   void _performSmartRecalculation(String amountText) {
-    final newAmount = double.tryParse(amountText);
+    final newAmount = _selectedCurrency != null
+        ? AmountParser.getPureDouble(amountText, _selectedCurrency!.code)
+        : CurrencyInputFormatter.extractNumber(amountText);
     if (newAmount == null || newAmount <= 0) {
       return; // Invalid input, don't recalculate
     }
@@ -538,6 +805,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
     // 🔍 DEBUG LOGGING - Log auto-recalculation
     print('=== AUTO-RECALCULATION DEBUG ===');
     print('Split Type: $_splitType');
+    print('Currency: ${_selectedCurrency?.code}');
     print('Old Amount: $_lastProcessedAmount');
     print('New Amount: $newAmount');
     print('Splits BEFORE recalculation:');
@@ -640,7 +908,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
       largestSplit['amount'] = (largestSplit['amount'] ?? 0.0) + difference;
 
       // Recalculate percentage for adjusted split
-      final totalAmount = double.tryParse(_amountController.text) ?? 0;
+      final totalAmount = _selectedCurrency != null
+          ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+          : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
       if (totalAmount > 0) {
         largestSplit['percentage'] =
             ((largestSplit['amount'] ?? 0.0) / totalAmount) * 100.0;
@@ -658,7 +928,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
     if (_splits.isEmpty) return;
 
     _originalRatios.clear();
-    double totalAmount = double.tryParse(_amountController.text) ?? 0.0;
+    double totalAmount = _selectedCurrency != null
+        ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0.0
+        : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0.0;
 
     if (totalAmount > 0) {
       for (var split in _splits) {
@@ -673,7 +945,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
   void _restoreOriginalRatios() {
     if (!_hasOriginalRatios || _originalRatios.length != _splits.length) return;
 
-    double currentAmount = double.tryParse(_amountController.text) ?? 0.0;
+    double currentAmount = _selectedCurrency != null
+        ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0.0
+        : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0.0;
     if (currentAmount <= 0) return;
 
     for (int i = 0; i < _splits.length; i++) {
@@ -699,7 +973,11 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
             ),
           ),
           child: AppBar(
-            title: const Text('Sửa chi phí', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+            title: const Text('Sửa chi phí',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20)),
             elevation: 0,
             backgroundColor: Colors.transparent,
             foregroundColor: Colors.white,
@@ -731,15 +1009,217 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                       controller: _descriptionController,
                       decoration: const InputDecoration(labelText: 'Mô tả'),
                     ),
-                    TextFormField(
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: AmountTextField(
+                            currencyCode: _selectedCurrency?.code ?? 'VND',
                       controller: _amountController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Số tiền'),
-                      validator: (v) => v == null || double.tryParse(v) == null
-                          ? 'Nhập số hợp lệ'
-                          : null,
-                      onChanged: _onAmountFieldChanged,
+                      labelText: 'Số tiền',
+                      onChanged: (value) => _onAmountFieldChanged(value),
                     ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          flex: 2,
+                          child: InkWell(
+                            onTap: () => _showCurrencyPicker(context),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(labelText: 'Tiền tệ'),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _selectedCurrency != null
+                                          ? _selectedCurrency!.code
+                                          : 'Chọn tiền tệ',
+                                      style: const TextStyle(fontSize: 16),
+                                    ),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_groupDefaultCurrencyCode != null &&
+                                          _selectedCurrency?.code ==
+                                              _groupDefaultCurrencyCode) ...[
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 4, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.green.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: const Text(
+                                            'Mặc định',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.green,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                      ],
+                                      const Icon(Icons.arrow_drop_down),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Currency conversion info
+                    if (_selectedCurrency != null &&
+                        _groupDefaultCurrencyCode != null &&
+                        _selectedCurrency!.code != _groupDefaultCurrencyCode) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.swap_horiz,
+                                    size: 16, color: Colors.blue[700]),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Chuyển đổi tiền tệ',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.blue[700],
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Số tiền sẽ được tự động quy đổi từ ${_selectedCurrency!.code} sang $_groupDefaultCurrencyCode (tiền tệ mặc định của nhóm)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[600],
+                              ),
+                            ),
+
+                            // Exchange rate display
+                            if (_isLoadingExchangeRate) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.blue[600],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Đang tải tỷ giá...',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.blue[600],
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else if (_currentExchangeRate != null) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'Tỷ giá: 1 ${_selectedCurrency!.code} = ${NumberFormat('#,##0.######').format(_currentExchangeRate)} $_groupDefaultCurrencyCode',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+
+                              // Converted amount preview
+                              if (_amountController.text.isNotEmpty &&
+                                  (_selectedCurrency != null
+                                      ? AmountParser.getPureDouble(
+                                              _amountController.text,
+                                              _selectedCurrency!.code) !=
+                                          null
+                                      : CurrencyInputFormatter.extractNumber(
+                                              _amountController.text) !=
+                                          null)) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    _getConvertedAmountText(),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.orange[700],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ] else ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.warning_amber_rounded,
+                                        size: 14, color: Colors.orange[600]),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        'Không thể tải tỷ giá hiện tại (sử dụng tỷ giá ước tính)',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.orange[600],
+                                          fontStyle: FontStyle.italic,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+
                     const SizedBox(height: 12),
                     TextFormField(
                       readOnly: true,
@@ -874,11 +1354,12 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                           children: [
                             ..._splits.map((split) {
                               final participant = split['participant'];
-                              final totalAmount =
-                                  double.tryParse(_amountController.text) ?? 0;
+                              final totalAmount = _selectedCurrency != null
+                                  ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+                                  : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
                               final equalAmount = totalAmount > 0
                                   ? totalAmount / _splits.length
-                                  : 0;
+                                  : 0.0;
                               final equalPercentage = 100.0 / _splits.length;
 
                               return Padding(
@@ -894,7 +1375,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                           fontWeight: FontWeight.w500),
                                     ),
                                     Text(
-                                      '${NumberFormat('#,##0', 'vi_VN').format(equalAmount)} ₫ (${equalPercentage.toStringAsFixed(1)}%)',
+                                      '${CurrencyFormatter.formatMoney(equalAmount, _selectedCurrency?.code ?? 'VND')} (${equalPercentage.toStringAsFixed(1)}%)',
                                       style: TextStyle(color: Colors.blue[700]),
                                     ),
                                   ],
@@ -910,7 +1391,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                   style: TextStyle(fontWeight: FontWeight.bold),
                                 ),
                                 Text(
-                                  '${NumberFormat('#,##0', 'vi_VN').format(double.tryParse(_amountController.text) ?? 0)} ₫ (100.0%)',
+                                    '${CurrencyFormatter.formatMoney(_selectedCurrency != null ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0 : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0, _selectedCurrency?.code ?? 'VND')} (100.0%)',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: Colors.green),
@@ -951,7 +1432,7 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                 '0',
                             decoration: InputDecoration(
                               labelText:
-                                  '${participant['name']} (${_splitType == 'AMOUNT' ? 'VND' : '%'})',
+                                                                      '${participant['name']} (${_splitType == 'AMOUNT' ? (_selectedCurrency?.code ?? 'VND') : '%'})',
                               border: const OutlineInputBorder(),
                               hintText: _splitType == 'AMOUNT' ? '0' : '0.0',
                             ),
@@ -963,9 +1444,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                 if (_splitType == 'AMOUNT') {
                                   split['amount'] = double.tryParse(value) ?? 0;
                                   // Tính lại percentage
-                                  final totalAmount =
-                                      double.tryParse(_amountController.text) ??
-                                          0;
+                                  final totalAmount = _selectedCurrency != null
+                                      ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+                                      : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
                                   if (totalAmount > 0) {
                                     split['percentage'] =
                                         (split['amount'] / totalAmount) * 100;
@@ -974,9 +1455,9 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                   split['percentage'] =
                                       double.tryParse(value) ?? 0;
                                   // Tính lại amount
-                                  final totalAmount =
-                                      double.tryParse(_amountController.text) ??
-                                          0;
+                                  final totalAmount = _selectedCurrency != null
+                                      ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+                                      : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
                                   split['amount'] =
                                       (split['percentage'] / 100.0) *
                                           totalAmount;
@@ -1055,13 +1536,26 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                   size: 16),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(
-                                  'Tổng: ${NumberFormat('#,##0', 'vi_VN').format(_calculateTotalAmount())} ₫ ${_getValidationColor() == Colors.green ? '✓' : '(cần bằng ${NumberFormat('#,##0', 'vi_VN').format(double.tryParse(_amountController.text) ?? 0)} ₫)'}',
+                                child: Builder(
+                                  builder: (context) {
+                                    final totalAmount = _calculateTotalAmount();
+                                    final expectedAmount = _selectedCurrency != null
+                                        ? AmountParser.getPureDouble(_amountController.text, _selectedCurrency!.code) ?? 0
+                                        : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
+                                    final currencyCode = _selectedCurrency?.code ?? 'VND';
+                                    final isValid = _getValidationColor() == Colors.green;
+                                    final formattedTotal = CurrencyFormatter.formatMoney(totalAmount, currencyCode);
+                                    final formattedExpected = CurrencyFormatter.formatMoney(expectedAmount, currencyCode);
+                                    
+                                    return Text(
+                                      'Tổng: $formattedTotal ${isValid ? '✓' : '(cần bằng $formattedExpected)'}',
                                   style: TextStyle(
                                     color: _getValidationColor(),
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
                                   ),
+                                    );
+                                  },
                                 ),
                               ),
                             ],
@@ -1150,93 +1644,97 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                       );
                                     },
                                     child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.1),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: [
-                                          Image.network(
-                                            replaceBaseUrl(att['fileUrl']),
-                                            fit: BoxFit.cover,
-                                            loadingBuilder: (context, child,
-                                                loadingProgress) {
-                                              if (loadingProgress == null)
-                                                return child;
-                                              return Container(
-                                                color: Colors.grey[200],
-                                                child: const Center(
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                          strokeWidth: 2),
-                                                ),
-                                              );
-                                            },
-                                            errorBuilder:
-                                                (context, error, stackTrace) {
-                                              return Container(
-                                                color: Colors.grey[200],
-                                                child: Icon(Icons.broken_image,
-                                                    color: Colors.grey[400]),
-                                              );
-                                            },
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(12),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                Colors.black.withOpacity(0.1),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 2),
                                           ),
-                                          Positioned(
-                                            top: 0,
-                                            right: 0,
-                                            child: GestureDetector(
-                                              onTap: () => setState(() =>
-                                                  _existingAttachments
-                                                      .remove(att)),
-                                              child: Container(
-                                                width: 24,
-                                                height: 24,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.red
-                                                      .withOpacity(0.9),
-                                                  shape: BoxShape.circle,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black
-                                                          .withOpacity(0.2),
-                                                      blurRadius: 3,
-                                                      offset:
-                                                          const Offset(0, 1),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: const Icon(
-                                                  Icons.close,
-                                                  color: Colors.white,
-                                                  size: 16,
+                                        ],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            Image.network(
+                                              replaceBaseUrl(att['fileUrl']),
+                                              fit: BoxFit.cover,
+                                              loadingBuilder: (context, child,
+                                                  loadingProgress) {
+                                                if (loadingProgress == null)
+                                                  return child;
+                                                return Container(
+                                                  color: Colors.grey[200],
+                                                  child: const Center(
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                            strokeWidth: 2),
+                                                  ),
+                                                );
+                                              },
+                                              errorBuilder:
+                                                  (context, error, stackTrace) {
+                                                return Container(
+                                                  color: Colors.grey[200],
+                                                  child: Icon(
+                                                      Icons.broken_image,
+                                                      color: Colors.grey[400]),
+                                                );
+                                              },
+                                            ),
+                                            Positioned(
+                                              top: 0,
+                                              right: 0,
+                                              child: GestureDetector(
+                                                onTap: () => setState(() =>
+                                                    _existingAttachments
+                                                        .remove(att)),
+                                                child: Container(
+                                                  width: 24,
+                                                  height: 24,
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.red
+                                                        .withOpacity(0.9),
+                                                    shape: BoxShape.circle,
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: Colors.black
+                                                            .withOpacity(0.2),
+                                                        blurRadius: 3,
+                                                        offset:
+                                                            const Offset(0, 1),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.close,
+                                                    color: Colors.white,
+                                                    size: 16,
+                                                  ),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
                                         ),
                                       ),
                                     ),
                                   );
                                 } else {
                                   // New attachments
-                                  final file = _newAttachments[index - _existingAttachments.length];
+                                  final file = _newAttachments[
+                                      index - _existingAttachments.length];
                                   return GestureDetector(
                                     onTap: () {
                                       showDialog(
                                         context: context,
                                         builder: (_) => _ImagePreviewDialog(
                                           attachments: _newAttachments,
-                                          initialPage: index - _existingAttachments.length,
+                                          initialPage: index -
+                                              _existingAttachments.length,
                                           isNetwork: false,
                                         ),
                                       );
@@ -1246,7 +1744,8 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                         borderRadius: BorderRadius.circular(12),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black.withOpacity(0.1),
+                                            color:
+                                                Colors.black.withOpacity(0.1),
                                             blurRadius: 4,
                                             offset: const Offset(0, 2),
                                           ),
@@ -1266,7 +1765,8 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                                               right: 0,
                                               child: GestureDetector(
                                                 onTap: () => setState(() =>
-                                                    _newAttachments.remove(file)),
+                                                    _newAttachments
+                                                        .remove(file)),
                                                 child: Container(
                                                   width: 24,
                                                   height: 24,
@@ -1325,7 +1825,8 @@ class _EditExpenseScreenState extends State<EditExpenseScreen> {
                             borderRadius: BorderRadius.circular(15),
                             onTap: _submit,
                             child: const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 28, vertical: 12),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1365,7 +1866,10 @@ class _ImagePreviewDialog extends StatefulWidget {
   final List<dynamic> attachments;
   final int initialPage;
   final bool isNetwork;
-  const _ImagePreviewDialog({required this.attachments, required this.initialPage, this.isNetwork = false});
+  const _ImagePreviewDialog(
+      {required this.attachments,
+      required this.initialPage,
+      this.isNetwork = false});
   @override
   State<_ImagePreviewDialog> createState() => _ImagePreviewDialogState();
 }
@@ -1410,7 +1914,8 @@ class _ImagePreviewDialogState extends State<_ImagePreviewDialog> {
                     borderRadius: BorderRadius.circular(16),
                     child: widget.isNetwork
                         ? Image.network(
-                            replaceBaseUrl(widget.attachments[pageIndex]['fileUrl']),
+                            replaceBaseUrl(
+                                widget.attachments[pageIndex]['fileUrl']),
                             fit: BoxFit.contain,
                           )
                         : Image.file(
@@ -1436,14 +1941,18 @@ class _ImagePreviewDialogState extends State<_ImagePreviewDialog> {
             right: 0,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   '${_currentPage + 1}/${widget.attachments.length}',
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ),

@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../services/settlement_service.dart';
 
 class RequestScreen extends StatefulWidget {
+  const RequestScreen({Key? key}) : super(key: key);
+  
   @override
   State<RequestScreen> createState() => _RequestScreenState();
 }
@@ -150,8 +152,21 @@ class _SentRequestsTabState extends State<_SentRequestsTab> {
         iconColor = Colors.teal;
         break;
       case 'INVITE':
+      case 'JOIN_GROUP_INVITE':
         iconData = Icons.group_add_rounded;
         iconColor = Colors.blue;
+        break;
+      case 'JOIN_GROUP_REQUEST':
+        iconData = Icons.person_add_rounded;
+        iconColor = Colors.green;
+        break;
+      case 'PAYMENT_REQUEST':
+        iconData = Icons.payment_rounded;
+        iconColor = Colors.orange;
+        break;
+      case 'PAYMENT_CONFIRM':
+        iconData = Icons.verified_rounded;
+        iconColor = Colors.purple;
         break;
       default:
         iconData = Icons.request_page_rounded;
@@ -398,7 +413,6 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
   }
 
   Widget buildRequestActionButtons(RequestModel req) {
-    if (req.status == 'PENDING_CONFIRM') return const SizedBox.shrink();
     if (req.status != 'PENDING') return const SizedBox.shrink();
     List<Widget> buttons = [];
     final ButtonStyle declineStyle = OutlinedButton.styleFrom(
@@ -409,7 +423,7 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
       padding: const EdgeInsets.symmetric(vertical: 10),
       textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
     );
-    final ButtonStyle payStyle = ElevatedButton.styleFrom(
+    final ButtonStyle acceptStyle = ElevatedButton.styleFrom(
       backgroundColor: Colors.green.shade500,
       foregroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -417,7 +431,7 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
       textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
       elevation: 0,
     );
-    if (req.type == 'PAYMENT_REQUEST') {
+    if (req.type == 'JOIN_GROUP_INVITE' || req.type == 'JOIN_GROUP_REQUEST') {
       buttons = [
         Expanded(
           child: OutlinedButton(
@@ -429,7 +443,25 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton(
-            style: payStyle,
+            style: acceptStyle,
+            onPressed: () => _handleAccept(req.id),
+            child: const Text('Đồng ý'),
+          ),
+        ),
+      ];
+    } else if (req.type == 'PAYMENT_REQUEST') {
+      buttons = [
+        Expanded(
+          child: OutlinedButton(
+            style: declineStyle,
+            onPressed: () => _handleDecline(req.id),
+            child: const Text('Từ chối'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ElevatedButton(
+            style: acceptStyle,
             onPressed: () => _showPaymentMethodSheet(req),
             child: const Text('Thanh toán'),
           ),
@@ -447,7 +479,7 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton(
-            style: payStyle,
+            style: acceptStyle,
             onPressed: () => _handleAccept(req.id),
             child: const Text('Xác nhận'),
           ),
@@ -541,8 +573,21 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
         iconColor = Colors.teal;
         break;
       case 'INVITE':
+      case 'JOIN_GROUP_INVITE':
         iconData = Icons.group_add_rounded;
         iconColor = Colors.blue;
+        break;
+      case 'JOIN_GROUP_REQUEST':
+        iconData = Icons.person_add_rounded;
+        iconColor = Colors.green;
+        break;
+      case 'PAYMENT_REQUEST':
+        iconData = Icons.payment_rounded;
+        iconColor = Colors.orange;
+        break;
+      case 'PAYMENT_CONFIRM':
+        iconData = Icons.verified_rounded;
+        iconColor = Colors.purple;
         break;
       default:
         iconData = Icons.request_page_rounded;
@@ -559,7 +604,7 @@ class _ReceivedRequestsTabState extends State<_ReceivedRequestsTab> with Widgets
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: (req.status == 'PENDING')
+            onTap: (req.status == 'PENDING' && req.type != 'JOIN_GROUP_REQUEST')
                 ? () async {
                     final action = await showModalBottomSheet<String>(
                       context: context,

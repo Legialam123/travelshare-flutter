@@ -14,7 +14,11 @@ class AuthService {
   static final FlutterSecureStorage storage = const FlutterSecureStorage();
 
   static Future<void> init() async {
-    dio = Dio(BaseOptions(baseUrl: dotenv.env['API_BASE_URL']!));
+    final baseUrl = dotenv.env['API_BASE_URL'];
+    if (baseUrl == null || baseUrl.isEmpty) {
+      throw Exception('API_BASE_URL không được cấu hình trong file .env');
+    }
+    dio = Dio(BaseOptions(baseUrl: baseUrl));
 
     dio.interceptors.clear();
     dio.interceptors.add(InterceptorsWrapper(

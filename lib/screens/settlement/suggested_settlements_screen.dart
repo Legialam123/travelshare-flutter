@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../services/settlement_service.dart';
 import '../../services/group_detail_service.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/user.dart';
 import '../../services/auth_service.dart';
+import '../../utils/currency_formatter.dart';
 import '../../screens/settlement/settlement_overview_screen.dart';
 
 class SuggestedSettlementsScreen extends StatefulWidget {
@@ -23,11 +23,10 @@ class SuggestedSettlementsScreen extends StatefulWidget {
       _SuggestedSettlementsScreenState();
 }
 
-class _SuggestedSettlementsScreenState
-    extends State<SuggestedSettlementsScreen> with WidgetsBindingObserver {
+class _SuggestedSettlementsScreenState extends State<SuggestedSettlementsScreen>
+    with WidgetsBindingObserver {
   late Future<List<dynamic>> _future;
-  final _currencyFormat =
-      NumberFormat.currency(locale: 'vi_VN', symbol: '₫', decimalDigits: 0);
+  List<dynamic> _pendingSettlements = [];
 
   @override
   void initState() {
@@ -51,11 +50,19 @@ class _SuggestedSettlementsScreenState
     }
   }
 
-  void _loadSuggestions() {
+  void _loadSuggestions() async {
     _future = SettlementService.fetchSuggestedSettlements(
       widget.groupId,
       userOnly: widget.userOnly,
     );
+    // Load pending settlements song song
+    final history =
+        await SettlementService.fetchSettlementHistory(widget.groupId);
+    setState(() {
+      _pendingSettlements = history
+          .where((item) => item is Map && item['status'] == 'PENDING')
+          .toList();
+    });
   }
 
   Future<void> _confirmPayment(Map<String, dynamic> s) async {
@@ -85,20 +92,44 @@ class _SuggestedSettlementsScreenState
     }
   }
 
-  Future<void> _createPendingSettlement(Map<String, dynamic> s, String? method) async {
-    final success = await SettlementService.createSettlement(
-      groupId: s['groupId'],
-      fromParticipantId: s['fromParticipantId'],
-      toParticipantId: s['toParticipantId'],
-      amount: s['amount'],
-      currencyCode: s['currencyCode'],
-      status: 'PENDING',
-      settlementMethod: method,
-      description: s['description'],
-    );
+  Future<void> _createPendingSettlement(
+      Map<String, dynamic> s, String? method) async {
+    bool success = false;
+    String message = '';
+    if (method == 'CASH') {
+      // Người nợ xác nhận đã thanh toán, gửi yêu cầu xác nhận cho người nhận
+      success = await SettlementService.createSettlement(
+        groupId: s['groupId'],
+        fromParticipantId: s['fromParticipantId'],
+        toParticipantId: s['toParticipantId'],
+        amount: s['amount'],
+        currencyCode: s['currencyCode'],
+        status: 'PENDING',
+        settlementMethod: method,
+        description: s['description'],
+      );
+      message = success
+          ? '✅ Đã gửi yêu cầu xác nhận thanh toán cho người nhận.'
+          : '❌ Lỗi khi gửi yêu cầu';
+    } else {
+      // Người nhận gửi yêu cầu thanh toán cho người nợ
+      success = await SettlementService.createSettlement(
+        groupId: s['groupId'],
+        fromParticipantId: s['fromParticipantId'],
+        toParticipantId: s['toParticipantId'],
+        amount: s['amount'],
+        currencyCode: s['currencyCode'],
+        status: 'PENDING',
+        settlementMethod: method,
+        description: s['description'],
+      );
+      message = success
+          ? '✅ Đã gửi yêu cầu thanh toán đến người nợ.'
+          : '❌ Lỗi khi gửi yêu cầu';
+    }
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(success ? '✅ Đã gửi yêu cầu thanh toán.' : '❌ Lỗi khi gửi yêu cầu'),
+        content: Text(message),
       ));
       if (success) setState(_loadSuggestions);
     }
@@ -108,7 +139,8 @@ class _SuggestedSettlementsScreenState
     final success = await SettlementService.confirmSettlement(s['id']);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(success ? '✅ Đã xác nhận đã nhận tiền.' : '❌ Lỗi khi xác nhận'),
+        content: Text(
+            success ? '✅ Đã xác nhận đã nhận tiền.' : '❌ Lỗi khi xác nhận'),
       ));
       if (success) setState(_loadSuggestions);
     }
@@ -127,23 +159,28 @@ class _SuggestedSettlementsScreenState
         );
         if (paymentUrl != null) {
           if (context.mounted) {
-            await launchUrl(Uri.parse(paymentUrl), mode: LaunchMode.externalApplication);
+            await launchUrl(Uri.parse(paymentUrl),
+                mode: LaunchMode.externalApplication);
           }
         } else {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không lấy được link thanh toán VNPay.')));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Không lấy được link thanh toán VNPay.')));
           }
         }
       } catch (e) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi VNPay: $e')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('Lỗi VNPay: $e')));
         }
       }
     } else {
       final success = await SettlementService.confirmSettlement(s['id']);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(success ? '✅ Đã gửi xác nhận đã thanh toán.' : '❌ Lỗi khi xác nhận'),
+          content: Text(success
+              ? '✅ Đã gửi xác nhận đã thanh toán.'
+              : '❌ Lỗi khi xác nhận'),
         ));
         if (success) setState(_loadSuggestions);
       }
@@ -171,7 +208,8 @@ class _SuggestedSettlementsScreenState
               onTap: () async {
                 Navigator.pop(context);
                 try {
-                  final paymentUrl = await SettlementService.createVnPaySettlement(
+                  final paymentUrl =
+                      await SettlementService.createVnPaySettlement(
                     groupId: s['groupId'],
                     fromParticipantId: s['fromParticipantId'],
                     toParticipantId: s['toParticipantId'],
@@ -181,17 +219,21 @@ class _SuggestedSettlementsScreenState
                   );
                   if (paymentUrl != null) {
                     if (context.mounted) {
-                      await launchUrl(Uri.parse(paymentUrl), mode: LaunchMode.externalApplication);
+                      await launchUrl(Uri.parse(paymentUrl),
+                          mode: LaunchMode.externalApplication);
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Sau khi thanh toán xong, vui lòng quay lại app và bấm làm mới để cập nhật trạng thái.'),
+                          content: Text(
+                              'Sau khi thanh toán xong, vui lòng quay lại app và bấm làm mới để cập nhật trạng thái.'),
                         ),
                       );
                     }
                   } else {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Không lấy được link thanh toán VNPay.')),
+                        const SnackBar(
+                            content:
+                                Text('Không lấy được link thanh toán VNPay.')),
                       );
                     }
                   }
@@ -210,7 +252,8 @@ class _SuggestedSettlementsScreenState
     );
   }
 
-  Future<Map<String, dynamic>> _getGroupAndRole(int groupId, String currentUserId) async {
+  Future<Map<String, dynamic>> _getGroupAndRole(
+      int groupId, String currentUserId) async {
     final groupDetail = await GroupDetailService.fetchGroupDetail(groupId);
     final participants = groupDetail['participants'] as List<dynamic>;
     final participant = participants.firstWhere(
@@ -251,191 +294,414 @@ class _SuggestedSettlementsScreenState
             }
             final isAdmin = groupSnapshot.data!['isAdmin'] as bool;
             final myParticipantId = groupSnapshot.data!['myParticipantId'];
-    return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        iconTheme: const IconThemeData(color: Colors.white),
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF667eea), Color(0xFF764ba2)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.white,
-          statusBarIconBrightness: Brightness.dark,
-          statusBarBrightness: Brightness.light,
-        ),
-        title: Text(
-          widget.userOnly
-            ? 'Gợi ý thanh toán của bạn'
-              : 'Tất cả gợi ý thanh toán',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
-        ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.history, color: Colors.white),
-                    tooltip: 'Lịch sử thanh toán',
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => SettlementOverviewScreen(groupId: widget.groupId),
-                        ),
-                      );
-                    },
+            return Scaffold(
+              appBar: PreferredSize(
+                preferredSize: const Size.fromHeight(kToolbarHeight),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                   ),
-                ],
-      ),
-      body: FutureBuilder<List<dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Lỗi: ${snapshot.error}'));
-          }
-          final suggestions = snapshot.data ?? [];
-          if (suggestions.isEmpty) {
-            return const Center(child: Text('Không có gợi ý thanh toán.'));
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: suggestions.length,
-            itemBuilder: (context, index) {
-              final s = suggestions[index] as Map<String, dynamic>;
+                  child: AppBar(
+                    title: Text(
+                      widget.userOnly
+                          ? 'Gợi ý thanh toán của bạn'
+                          : 'Tất cả gợi ý thanh toán',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                    elevation: 0,
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    iconTheme: const IconThemeData(color: Colors.white),
+                    systemOverlayStyle: const SystemUiOverlayStyle(
+                      statusBarColor: Colors.white,
+                      statusBarIconBrightness: Brightness.dark,
+                      statusBarBrightness: Brightness.light,
+                    ),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.history, color: Colors.white),
+                        tooltip: 'Lịch sử thanh toán',
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => SettlementOverviewScreen(
+                                  groupId: widget.groupId),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              body: FutureBuilder<List<dynamic>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Lỗi: ${snapshot.error}'));
+                  }
+                  final suggestions = snapshot.data ?? [];
+                  if (suggestions.isEmpty) {
+                    return const Center(
+                        child: Text('Không có gợi ý thanh toán.'));
+                  }
+                  return ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: suggestions.length,
+                    itemBuilder: (context, index) {
+                      final s = suggestions[index] as Map<String, dynamic>;
+                      // Khai báo các biến dùng xuyên suốt itemBuilder
+                      final fromUser = s['fromParticipantUser'];
+                      final toUser = s['toParticipantUser'];
                       final fromId = s['fromParticipantId'];
                       final toId = s['toParticipantId'];
-                      final isYouOwe = myParticipantId != null && fromId == myParticipantId;
-                      final isYouReceive = myParticipantId != null && toId == myParticipantId;
+                      final isFromLinked = fromUser != null;
+                      final isToLinked = toUser != null;
+                      final isYouOwe =
+                          myParticipantId != null && fromId == myParticipantId;
+                      final isYouReceive =
+                          myParticipantId != null && toId == myParticipantId;
+                      // ...các biến này đã được khai báo ở trên nếu cần...
+                      if (!isFromLinked && isYouReceive) {
+                        // Chỉ hiển thị nút xác nhận nhận tiền, căn phải
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                    '${s['fromParticipantName']} → ${s['toParticipantName']}',
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                Text(
+                                    'Số tiền: ${CurrencyFormatter.formatMoney((s['amount'] as num).toDouble(), s['currencyCode'] ?? 'VND')}'),
+                                const SizedBox(height: 4),
+                                Text("Mô tả: ${s['description'] ?? ''}",
+                                    style:
+                                        const TextStyle(color: Colors.black)),
+                                const SizedBox(height: 12),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    _buildStyledButton(
+                                      onTap: () => _confirmPayment(s),
+                                      icon: Icons.account_balance_wallet,
+                                      label: 'Xác nhận\nnhận tiền',
+                                      colors: [
+                                        Colors.green.shade600,
+                                        Colors.green.shade700
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                      // Nếu 1 trong 2 participant chưa liên kết user, ẩn nút thao tác
+                      if (!isFromLinked || !isToLinked) {
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 8),
+                          color: const Color(0xFFF8F6FF),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                    '${s['fromParticipantName']} → ${s['toParticipantName']}',
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                Text(
+                                    'Số tiền: ${CurrencyFormatter.formatMoney((s['amount'] as num).toDouble(), s['currencyCode'] ?? 'VND')}',
+                                    style:
+                                        const TextStyle(color: Colors.black)),
+                                const SizedBox(height: 4),
+                                Text("Mô tả: ${s['description'] ?? ''}",
+                                    style:
+                                        const TextStyle(color: Colors.black)),
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10, horizontal: 12),
+                                  decoration: BoxDecoration(
+                                    color: Color(0xFFFFF3E0),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Icon(Icons.info_outline,
+                                          color: Color(0xFFFF9800), size: 20),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Người nhận chưa liên kết tài khoản. Vui lòng thanh toán trực tiếp và nhắc họ liên kết tài khoản để xác nhận.',
+                                          style: const TextStyle(
+                                            color: Color(0xFFB26A00),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          textAlign: TextAlign.justify,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
+                      // ...phần còn lại giữ nguyên...
                       final isRelated = isYouOwe || isYouReceive;
                       // Logic hiển thị nút
                       List<Widget> buttons = [];
+                      // Check for duplicate PENDING settlement for this pair (dựa vào _pendingSettlements)
+                      bool hasPending = false;
+                      try {
+                        hasPending = _pendingSettlements.any((item) {
+                          if (item is! Map) return false;
+                          return item['fromParticipantId'] ==
+                                  s['fromParticipantId'] &&
+                              item['toParticipantId'] == s['toParticipantId'] &&
+                              item['amount'] == s['amount'] &&
+                              item['currencyCode'] == s['currencyCode'];
+                        });
+                      } catch (_) {
+                        hasPending = false;
+                      }
                       if (isAdmin) {
                         if (!isRelated) {
                           buttons = [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _confirmPayment(s),
-                                child: const Text('Xác nhận \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _createPendingSettlement(s, 'CASH'),
+                              icon: Icons.check_circle,
+                              label: 'Xác nhận\nthanh toán',
+                              colors: [
+                                Colors.green.shade600,
+                                Colors.green.shade700
+                              ],
+                              disabled: hasPending,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _showPaymentMethodSheet(s),
-                                child: const Text('Yêu cầu \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _showPaymentMethodSheet(s),
+                              icon: Icons.payment,
+                              label: 'Yêu cầu\nthanh toán',
+                              colors: [
+                                Colors.blue.shade600,
+                                Colors.blue.shade700
+                              ],
+                              disabled: hasPending,
                             ),
                           ];
                         } else if (isYouOwe) {
                           buttons = [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _confirmPayment(s),
-                                child: const Text('Xác nhận \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _createPendingSettlement(s, 'CASH'),
+                              icon: Icons.check_circle,
+                              label: 'Xác nhận\nthanh toán',
+                              colors: [
+                                Colors.green.shade600,
+                                Colors.green.shade700
+                              ],
+                              disabled: hasPending,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _showPaymentMethodSheet(s),
-                                child: const Text('Thanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _showPaymentMethodSheet(s),
+                              icon: Icons.credit_card,
+                              label: 'Thanh toán',
+                              colors: [
+                                const Color(0xFF667eea),
+                                const Color(0xFF764ba2)
+                              ],
+                              disabled: hasPending,
                             ),
                           ];
                         } else if (isYouReceive) {
                           buttons = [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _confirmReceived(s),
-                                child: const Text('Xác nhận \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _confirmPayment(s),
+                              icon: Icons.account_balance_wallet,
+                              label: 'Xác nhận\nnhận tiền',
+                              colors: [
+                                Colors.green.shade600,
+                                Colors.green.shade700
+                              ],
+                              disabled: hasPending,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _createPendingSettlement(s, null),
-                                child: const Text('Yêu cầu \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _createPendingSettlement(s, null),
+                              icon: Icons.request_quote,
+                              label: 'Yêu cầu\nthanh toán',
+                              colors: [
+                                Colors.orange.shade600,
+                                Colors.orange.shade700
+                              ],
+                              disabled: hasPending,
                             ),
                           ];
                         }
                       } else {
-                        if (!isRelated) return const SizedBox.shrink();
+                        // Luôn hiển thị item, chỉ hiển thị nút thao tác nếu là người nợ hoặc người nhận
                         if (isYouOwe) {
                           buttons = [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _confirmPayment(s),
-                                child: const Text('Xác nhận \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _createPendingSettlement(s, 'CASH'),
+                              icon: Icons.check_circle,
+                              label: 'Xác nhận\nthanh toán',
+                              colors: [
+                                Colors.green.shade600,
+                                Colors.green.shade700
+                              ],
+                              disabled: hasPending,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _showPaymentMethodSheet(s),
-                                child: const Text('Thanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _showPaymentMethodSheet(s),
+                              icon: Icons.credit_card,
+                              label: 'Thanh toán',
+                              colors: [
+                                const Color(0xFF667eea),
+                                const Color(0xFF764ba2)
+                              ],
+                              disabled: hasPending,
                             ),
                           ];
                         } else if (isYouReceive) {
                           buttons = [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _confirmReceived(s),
-                                child: const Text('Xác nhận \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _confirmPayment(s),
+                              icon: Icons.account_balance_wallet,
+                              label: 'Xác nhận\nnhận tiền',
+                              colors: [
+                                Colors.green.shade600,
+                                Colors.green.shade700
+                              ],
+                              disabled: hasPending,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () => _createPendingSettlement(s, null),
-                                child: const Text('Yêu cầu \nthanh toán', textAlign: TextAlign.center),
-                              ),
+                            _buildStyledButton(
+                              onTap: () => _createPendingSettlement(s, null),
+                              icon: Icons.request_quote,
+                              label: 'Yêu cầu\nthanh toán',
+                              colors: [
+                                Colors.orange.shade600,
+                                Colors.orange.shade700
+                              ],
+                              disabled: hasPending,
                             ),
                           ];
+                        } else {
+                          buttons = [];
                         }
                       }
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                              Text('${s['fromParticipantName']} → ${s['toParticipantName']}',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                              Text('Số tiền: ${_currencyFormat.format(s['amount'])}'),
-                      const SizedBox(height: 4),
-                      Text(s['description'] ?? '',
-                          style: const TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 12),
-                              Row(children: buttons),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  '${s['fromParticipantName']} → ${s['toParticipantName']}',
+                                  style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              Text(
+                                  'Số tiền: ${CurrencyFormatter.formatMoney((s['amount'] as num).toDouble(), s['currencyCode'] ?? 'VND')}'),
+                              const SizedBox(height: 4),
+                              Text("Mô tả: ${s['description'] ?? ''}",
+                                  style: const TextStyle(color: Colors.black)),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceEvenly,
+                                children: buttons,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildStyledButton({
+    required VoidCallback onTap,
+    required IconData icon,
+    required String label,
+    required List<Color> colors,
+    bool disabled = false,
+  }) {
+    return Opacity(
+      opacity: disabled ? 0.5 : 1.0,
+      child: Container(
+        width: 145,
+        height: 45,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: colors),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: colors.first.withOpacity(0.25),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: disabled ? null : onTap,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

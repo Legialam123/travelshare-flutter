@@ -48,7 +48,7 @@ class GroupMemberDrawer extends StatelessWidget {
                     );
                   }
                 : null,
-            trailing: p.user?.id == null && isAdmin
+            trailing: !p.hasLinkedUser && isAdmin
                 ? TextButton(
                     onPressed: () {
                       // TODO: Gửi lời mời liên kết user vào nhóm

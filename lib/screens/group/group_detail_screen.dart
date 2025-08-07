@@ -10,19 +10,23 @@ import 'package:http_parser/http_parser.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:io';
 import '../../models/group.dart';
 import '../../services/auth_service.dart';
 import '../../services/group_service.dart';
 import '../../services/group_detail_service.dart';
+import '../../services/media_service.dart';
 import '../../providers/auth_provider.dart';
 import '../expense/add_expense_screen.dart';
 import '../../models/user.dart';
 import '../expense/expense_detail_screen.dart';
 import '../group/group_management_screen.dart';
+import '../group/group_statistics_screen.dart';
 import '../../utils/color_utils.dart';
+import '../../utils/currency_formatter.dart';
+import '../../models/expense.dart';
+import '../../widgets/currency_conversion_display.dart';
 
 // 🎯 Helper class for category grouping
 class CategoryGroup {
@@ -78,11 +82,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   String _expenseSort = 'newest'; // 'newest', 'oldest', 'amount', 'category'
   Map<String, bool> _categoryExpansionState = {};
 
-  final NumberFormat _currencyFormat = NumberFormat.currency(
-    locale: 'vi_VN',
-    symbol: '₫',
-    decimalDigits: 0,
-  );
+  // Removed hardcoded currency format - will use dynamic formatting based on group currency
 
   Map<String, String> _userNameCache = {}; // Cache tên người dùng
 
@@ -123,7 +123,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           };
 
       final totalAmount = expenseList.fold<double>(0.0, (sum, expense) {
-        final amount = expense['amount'];
+        final amount = expense['convertedAmount'] ?? expense['amount'] ?? 0;
         if (amount is num) return sum + amount.toDouble();
         if (amount is String) {
           final parsed = double.tryParse(amount);
@@ -171,13 +171,24 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   }
 
   double _getExpenseAmount(dynamic expense) {
-    final amount = expense['amount'];
+    // Use convertedAmount for group context, fallback to amount for legacy data
+    final amount = expense['convertedAmount'] ?? expense['amount'] ?? 0;
     if (amount is num) return amount.toDouble();
     if (amount is String) {
       final parsed = double.tryParse(amount);
       return parsed ?? 0.0;
     }
     return 0.0;
+  }
+
+  // 🔒 Helper method to check if expense is locked
+  bool _isExpenseLocked(dynamic expense) {
+    if (expense is Expense) {
+      return expense.isExpenseLocked;
+    } else if (expense is Map<String, dynamic>) {
+      return expense['isLocked'] == true;
+    }
+    return false;
   }
 
   List<dynamic> _getSortedExpenses(List<dynamic> expenses) {
@@ -371,7 +382,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   }
 
   // 🎯 Build grouped expenses list by category
-  Widget _buildGroupedExpensesList(List<dynamic> expenses) {
+  Widget _buildGroupedExpensesList(List<dynamic> expenses, Group group) {
     final categoryGroups = _groupExpensesByCategory(expenses);
 
     if (categoryGroups.isEmpty) {
@@ -442,8 +453,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                _currencyFormat
-                                    .format(categoryGroup.totalAmount),
+                                CurrencyFormatter.formatMoney(
+                                    categoryGroup.totalAmount,
+                                    group.defaultCurrency ?? 'VND'),
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
@@ -487,7 +499,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                   children: [
                     const SizedBox(height: 8),
                     ...categoryGroup.expenses.map<Widget>((expense) {
-                      return _buildExpenseListTile(expense,
+                      return _buildExpenseListTile(expense, group,
                           showCategory: false);
                     }).toList(),
                   ],
@@ -500,7 +512,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   }
 
   // 🎯 Build flat expenses list
-  Widget _buildFlatExpensesList(List<dynamic> expenses) {
+  Widget _buildFlatExpensesList(List<dynamic> expenses, Group group) {
     final sortedExpenses = _getSortedExpenses(expenses);
 
     if (sortedExpenses.isEmpty) {
@@ -512,21 +524,81 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           12, 12, 12, 100), // 🎯 Bottom padding for FAB
       itemCount: sortedExpenses.length,
       itemBuilder: (context, index) {
-        return _buildExpenseListTile(sortedExpenses[index], showCategory: true);
+        return _buildExpenseListTile(sortedExpenses[index], group,
+            showCategory: true);
       },
     );
   }
 
-  // 🎯 Build individual expense list tile
-  Widget _buildExpenseListTile(dynamic expense, {bool showCategory = true}) {
-    final dateStr = expense['expenseDate'];
-    final formattedDate = dateStr != null
-        ? DateFormat('dd/MM/yyyy').format(DateTime.parse(dateStr))
-        : 'Chưa rõ ngày';
+  // 🎯 Build individual expense list tile - supporting both Expense and Map
+  Widget _buildExpenseListTile(dynamic expense, Group group,
+      {bool showCategory = true}) {
+    // Support both Expense object and legacy Map format
+    final String title;
+    final String formattedDate;
+    final String payerName;
+    final Color amountColor;
+    final IconData categoryIcon;
+    final int expenseId;
+    final Widget amountDisplay;
 
-    final category = expense['category'];
-    final amountColor =
-        category != null ? _safeColorFromHex(category['color']) : Colors.green;
+    if (expense is Expense) {
+      title = expense.title;
+      formattedDate = expense.formattedDate;
+      payerName = expense.payerName;
+      amountColor = expense.category != null
+          ? _safeColorFromHex(expense.category!.color)
+          : Colors.green;
+      categoryIcon = expense.category != null
+          ? _getCategoryIcon(expense.category!.iconCode)
+          : Icons.help_outline;
+      expenseId = expense.id;
+      amountDisplay = CurrencyConversionDisplay(
+        expense: expense,
+        groupDefaultCurrency: group.defaultCurrency ?? 'VND',
+        showCompact: true,
+      );
+    } else {
+      // Legacy Map format
+      final dateStr = expense['expenseDate'];
+      title = expense['title'] ?? '';
+      formattedDate = dateStr != null
+          ? DateFormat('dd/MM/yyyy').format(DateTime.parse(dateStr))
+          : 'Chưa rõ ngày';
+      payerName = expense['payer']?['name'] ?? '';
+      final category = expense['category'];
+      amountColor = category != null
+          ? _safeColorFromHex(category['color'])
+          : Colors.green;
+      categoryIcon = category != null
+          ? _getCategoryIcon(category['iconCode'])
+          : Icons.help_outline;
+      expenseId = expense['id'];
+
+      // Use convertedAmount for group context (null-safe)
+      final amount = expense['convertedAmount'] ?? expense['amount'] ?? 0;
+      amountDisplay = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: amountColor.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          CurrencyFormatter.formatMoney(
+            (amount as num).toDouble(),
+            group.defaultCurrency ?? 'VND',
+          ),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: amountColor,
+            fontSize: 14,
+          ),
+        ),
+      );
+    }
+
+    final category =
+        expense is Expense ? expense.category : expense['category'];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -535,7 +607,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: category != null
-              ? _safeColorFromHex(category['color']).withOpacity(0.2)
+              ? amountColor.withOpacity(0.2)
               : Colors.grey.withOpacity(0.15),
           width: 1,
         ),
@@ -547,7 +619,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           ),
           if (category != null)
             BoxShadow(
-              color: _safeColorFromHex(category['color']).withOpacity(0.08),
+              color: amountColor.withOpacity(0.08),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -562,7 +634,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             final result = await Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => ExpenseDetailScreen(expenseId: expense['id']),
+                builder: (_) => ExpenseDetailScreen(expenseId: expenseId),
               ),
             );
             if (result == true) {
@@ -582,13 +654,12 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color:
-                          _safeColorFromHex(category['color']).withOpacity(0.1),
+                      color: amountColor.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      _getCategoryIcon(category['iconCode']),
-                      color: _safeColorFromHex(category['color']),
+                      categoryIcon,
+                      color: amountColor,
                       size: 24,
                     ),
                   ),
@@ -599,7 +670,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        expense['title'] ?? '',
+                        title,
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -622,6 +693,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.grey[600],
+                              fontWeight: FontWeight.w500, // Màu xám đồng bộ
                             ),
                           ),
                         ],
@@ -637,10 +709,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              expense['payer']?['name'] ?? '',
+                              payerName,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Colors.grey[600],
+                                color: Colors.grey[600], // Màu xám đồng bộ
                                 fontWeight: FontWeight.w500,
                               ),
                               maxLines: 1,
@@ -649,26 +721,35 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                           ),
                         ],
                       ),
+                      
+                      // 🔒 Lock status row (if expense is locked)
+                      if (_isExpenseLocked(expense))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.lock,
+                                size: 14,
+                                color: Colors.orange[600], // Màu vàng cam
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Đã khóa',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600], // Màu xám đồng bộ
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),
-                // Số tiền
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: amountColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    _currencyFormat.format(expense['amount']),
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: amountColor,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
+                // Amount display (either CurrencyConversionDisplay or legacy format)
+                amountDisplay,
                 const SizedBox(width: 8),
                 const Icon(
                   Icons.arrow_forward_ios,
@@ -748,6 +829,12 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? '';
     return url.replaceFirst(
         RegExp(r'^https?://localhost:8080/TravelShare'), apiBaseUrl);
+  }
+
+  Future<String?> _loadAvatar(String? userId) async {
+    if (userId == null) return null;
+    final url = await MediaService.fetchUserAvatar(userId);
+    return replaceBaseUrl(url);
   }
 
   MediaType _getMediaType(String filePath) {
@@ -1339,30 +1426,31 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 20))
-                  :*/ FutureBuilder<Group>(
-                      future: _groupFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Text('Chi tiết nhóm',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 20));
-                        } else if (snapshot.hasData) {
-                          return Text(snapshot.data!.name,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 20));
-                        } else {
-                          return const Text('Chi tiết nhóm',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 20));
-                        }
-                      },
-                    ),
+                  :*/
+                  FutureBuilder<Group>(
+                future: _groupFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Text('Chi tiết nhóm',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20));
+                  } else if (snapshot.hasData) {
+                    return Text(snapshot.data!.name,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20));
+                  } else {
+                    return const Text('Chi tiết nhóm',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20));
+                  }
+                },
+              ),
               elevation: 0,
               backgroundColor: Colors.transparent,
               foregroundColor: Colors.white,
@@ -1373,6 +1461,31 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                 statusBarBrightness: Brightness.light,
               ),
               actions: [
+                IconButton(
+                  icon: const Icon(Icons.bar_chart),
+                  tooltip: 'Thống kê nhóm',
+                  onPressed: () async {
+                    try {
+                      final groupDetail =
+                          await GroupDetailService.fetchGroupDetail(
+                              widget.groupId);
+                      final group = Group.fromJson(groupDetail);
+                      if (!context.mounted) return;
+
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => GroupStatisticsScreen(group: group),
+                        ),
+                      );
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text("❌ Không thể tải thống kê nhóm: $e")),
+                      );
+                    }
+                  },
+                ),
                 IconButton(
                   icon: const Icon(Icons.menu),
                   tooltip: 'Quản lý nhóm',
@@ -1441,8 +1554,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                     indicatorColor: Color(0xFF667eea),
                     tabs: const [
                       Tab(text: 'Chi phí'),
-                      Tab(text: 'Balances'),
-                      Tab(text: 'Photos'),
+                      Tab(text: 'Số dư'),
+                      Tab(text: 'Hình ảnh'),
                     ],
                   ),
                 ),
@@ -1486,7 +1599,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                     final totalExpenses = expenses.fold<num>(
                       0,
                       (sum, e) {
-                        final amount = e['amount'];
+                        final amount = e['convertedAmount'] ?? e['amount'] ?? 0;
                         if (amount is num) return sum + amount;
                         if (amount is String) {
                           final parsed = double.tryParse(amount);
@@ -1507,7 +1620,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                       return payerUserId != null &&
                           payerUserId == currentUserId;
                     }).fold<num>(0, (sum, e) {
-                      final amount = e['amount'];
+                      final amount = e['convertedAmount'] ?? e['amount'] ?? 0;
 
                       if (amount is num) return sum + amount;
 
@@ -1540,7 +1653,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                                     const Text('Chi phí của tôi',
                                         style: TextStyle(
                                             fontWeight: FontWeight.bold)),
-                                    Text(_currencyFormat.format(myExpenses),
+                                    Text(
+                                        CurrencyFormatter.formatMoney(
+                                            myExpenses.toDouble(),
+                                            group.defaultCurrency ?? 'VND'),
                                         style: const TextStyle(
                                             fontWeight: FontWeight.bold,
                                             color: Colors.blue,
@@ -1550,7 +1666,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                                     const Text('Tổng chi phí',
                                         style: TextStyle(
                                             fontWeight: FontWeight.bold)),
-                                    Text(_currencyFormat.format(totalExpenses),
+                                    Text(
+                                        CurrencyFormatter.formatMoney(
+                                            totalExpenses.toDouble(),
+                                            group.defaultCurrency ?? 'VND'),
                                         style: const TextStyle(
                                             fontWeight: FontWeight.bold,
                                             color: Colors.green,
@@ -1589,8 +1708,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                         // 🎯 Expenses list - grouped or flat
                         Expanded(
                           child: _isGroupedByCategory
-                              ? _buildGroupedExpensesList(expenses)
-                              : _buildFlatExpensesList(expenses),
+                              ? _buildGroupedExpensesList(expenses, group)
+                              : _buildFlatExpensesList(expenses, group),
                         ),
                       ],
                     );
@@ -1643,7 +1762,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
 
                         for (var b in sortedBalances) {
                           if (b['participantUserId'] == currentUserId) {
-                            double value = (b['balance'] ?? 0).toDouble();
+                            double value = (b['balance'] ?? 0.0).toDouble();
                             if (value < 0) totalOwed += value.abs();
                             if (value > 0) totalReceivable += value;
                           }
@@ -1776,8 +1895,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                                                 const SizedBox(width: 10),
                                                 Text(
                                                   totalOwed > 0
-                                                      ? 'Bạn đang nợ người khác ${_currencyFormat.format(totalOwed)}'
-                                                      : 'Người khác đang nợ bạn ${_currencyFormat.format(totalReceivable)}',
+                                                      ? 'Bạn đang nợ người khác ${CurrencyFormatter.formatMoney(totalOwed, group.defaultCurrency)}'
+                                                      : 'Người khác đang nợ bạn ${CurrencyFormatter.formatMoney(totalReceivable, group.defaultCurrency)}',
                                                   style: const TextStyle(
                                                       color: Colors.white,
                                                       fontWeight:
@@ -1809,61 +1928,73 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                                   final b = sortedBalances[index];
                                   final name =
                                       b['participantName'] ?? 'Người dùng';
-                                  final balance = b['balance'] ?? 0.0;
-                                  final currency = b['currencyCode'] ?? '';
-                                  final avatarUrl = b['avatar'];
+                                  final balance =
+                                      (b['balance'] ?? 0.0).toDouble();
+                                  final userId =
+                                      b['participantUserId']?.toString();
                                   final isMe =
                                       b['participantUserId'] == currentUserId;
 
                                   final isPositive = balance >= 0;
                                   final formattedAmount =
-                                      _currencyFormat.format(balance.abs());
+                                      CurrencyFormatter.formatMoney(
+                                          balance.abs(), group.defaultCurrency);
 
-                                  return Card(
-                                    color: isPositive
-                                        ? Colors.green[50]
-                                        : Colors.red[50],
-                                    child: ListTile(
-                                      leading: CircleAvatar(
-                                        backgroundImage: avatarUrl != null &&
-                                                avatarUrl.isNotEmpty
-                                            ? NetworkImage(avatarUrl)
-                                            : const AssetImage(
-                                                    'assets/images/default_user_avatar.png')
-                                                as ImageProvider,
-                                      ),
-                                      title: Text(
-                                        name,
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      subtitle: isMe
-                                          ? const Text('Bạn',
-                                              style: TextStyle(
-                                                  fontStyle: FontStyle.italic))
-                                          : null,
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            '${isPositive ? '+' : '-'}$formattedAmount',
-                                            style: TextStyle(
-                                              fontSize: 18,
-                                              color: isPositive
-                                                  ? Colors.green
-                                                  : Colors.red,
-                                              fontWeight: FontWeight.bold,
-                                            ),
+                                  return FutureBuilder<String?>(
+                                    future: _loadAvatar(userId),
+                                    builder: (context, snapshot) {
+                                      final avatar = snapshot.data;
+                                      return Card(
+                                        color: isPositive
+                                            ? Colors.green[50]
+                                            : Colors.red[50],
+                                        child: ListTile(
+                                          leading: CircleAvatar(
+                                            radius: 22,
+                                            backgroundImage: (avatar != null &&
+                                                    avatar.isNotEmpty)
+                                                ? NetworkImage(avatar)
+                                                : const AssetImage(
+                                                        'assets/images/default_user_avatar.png')
+                                                    as ImageProvider,
+                                            backgroundColor: Colors.blue[100],
                                           ),
-                                          if (!isMe) const SizedBox(width: 16),
-                                        ],
-                                      ),
-                                    ),
+                                          title: Text(
+                                            name,
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black87,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          subtitle: isMe
+                                              ? const Text('Bạn',
+                                                  style: TextStyle(
+                                                      fontStyle:
+                                                          FontStyle.italic))
+                                              : null,
+                                          trailing: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                '${isPositive ? '+' : '-'}$formattedAmount',
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  color: isPositive
+                                                      ? Colors.green
+                                                      : Colors.red,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              if (!isMe)
+                                                const SizedBox(width: 16),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   );
                                 },
                               ),

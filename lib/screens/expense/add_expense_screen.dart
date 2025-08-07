@@ -4,14 +4,26 @@ import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../models/group.dart';
 import '../../../models/category.dart';
+import '../../../models/currency.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/category_service.dart';
+import '../../../services/group_service.dart';
+import '../../../services/currency_service.dart';
 import '../../../utils/color_utils.dart';
 import '../../../utils/icon_utils.dart';
+import '../../../utils/currency_formatter.dart';
+import '../../../utils/currency_input_formatter.dart';
+import '../../../widgets/currency_picker_modal.dart';
 import 'package:intl/intl.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter/services.dart';
+import '../../widgets/scan_receipt_dialog.dart';
+import '../../widgets/review_ocr_dialog.dart';
+import '../../services/chatgpt_ocr_service.dart';
+import '../../models/receipt_data.dart';
+import '../../widgets/amount_text_field.dart';
+import '../../utils/amount_parser.dart';
 
 class AddExpenseScreen extends StatefulWidget {
   final int groupId;
@@ -34,6 +46,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _amountController = TextEditingController();
+  final _amountFocusNode = FocusNode();
 
   String? _selectedCategoryId;
   String _splitType = 'EQUAL';
@@ -43,12 +56,19 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   List<Map<String, dynamic>> _splits = [];
   List<Category> _categories = [];
+  List<Currency> _currencies = [];
+  Currency? _selectedCurrency;
+  String? _groupDefaultCurrencyCode;
   bool _isLoading = true;
+
+  // Thêm biến để track exchange rate
+  double? _currentExchangeRate;
+  bool _isLoadingExchangeRate = false;
 
   @override
   void initState() {
     super.initState();
-    _selectedPayerId = widget.participants?.first.id;
+    _setDefaultPayer();
     _splits = widget.participants?.map((p) {
           return {
             'participantId': p.id,
@@ -57,28 +77,91 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
           };
         }).toList() ??
         [];
-    _loadCategories();
+
+    // Thêm listener cho amount controller để real-time update converted amount
+    _amountController.addListener(() {
+      if (_currentExchangeRate != null) {
+        setState(() {}); // Trigger rebuild để update converted amount
+      }
+    });
+
+    // AmountTextField tự xử lý format-on-blur, không cần listener
+
+    _loadData();
   }
 
-  Future<void> _loadCategories() async {
+  /// Set default payer to current user
+  void _setDefaultPayer() {
+    if (widget.participants == null || widget.participants!.isEmpty) {
+      _selectedPayerId = null;
+      return;
+    }
+
+    // Try to find current user in participants
+    if (widget.currentUserId != null) {
+      final currentUserParticipant = widget.participants!.firstWhere(
+        (p) => p.user?.id == widget.currentUserId,
+        orElse: () => widget.participants!.first,
+      );
+      _selectedPayerId = currentUserParticipant.id;
+      print(
+          '🔧 Set default payer: ${currentUserParticipant.name} (current user)');
+    } else {
+      // Fallback to first participant
+      _selectedPayerId = widget.participants!.first.id;
+      print(
+          '🔧 Set default payer: ${widget.participants!.first.name} (fallback)');
+    }
+  }
+
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final categories =
-          await CategoryService.fetchGroupExpenseCategories(widget.groupId);
+      // Load categories và currencies
+      final results = await Future.wait([
+        CategoryService.fetchGroupExpenseCategories(widget.groupId),
+        CurrencyService.fetchCurrencies(),
+      ]);
+
+      // Load group default currency separately
+      await _loadGroupDefaultCurrency();
+
+      final categories = results[0] as List<Category>;
+      final currencies = results[1] as List<Currency>;
+
       setState(() {
         _categories = categories;
+        _currencies = currencies;
         if (_categories.isNotEmpty) {
           _selectedCategoryId = _categories.first.id.toString();
         }
+        // Mặc định chọn currency của group hoặc VND nếu không có
+        _selectedCurrency = _groupDefaultCurrencyCode != null
+            ? currencies.firstWhere(
+                (c) => c.code == _groupDefaultCurrencyCode,
+                orElse: () => currencies.firstWhere((c) => c.code == 'VND',
+                    orElse: () => currencies.first),
+              )
+            : currencies.firstWhere((c) => c.code == 'VND',
+                orElse: () => currencies.first);
         _isLoading = false;
       });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Lỗi khi tải danh mục: $e')),
+          SnackBar(content: Text('❌ Lỗi khi tải dữ liệu: $e')),
         );
       }
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadGroupDefaultCurrency() async {
+    try {
+      final group = await GroupService.getGroupById(widget.groupId);
+      _groupDefaultCurrencyCode = group.defaultCurrency;
+    } catch (e) {
+      print('Warning: Could not load group default currency: $e');
     }
   }
 
@@ -97,6 +180,160 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         _attachments.addAll(images.take(remain));
       });
     }
+  }
+
+  /// Quét hóa đơn OCR với ChatGPT AI và tự động điền form
+  Future<void> _scanReceipt() async {
+    try {
+      // Step 1: Show scan dialog để chọn image
+      final scanResult = await ScanReceiptHelper.showScanDialog(context);
+      if (scanResult == null) return;
+
+      // Lấy imageFile từ scan result
+      final imageFile = scanResult['imageFile'] as XFile;
+
+      // Show loading dialog với message tối ưu
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('🤖 Đang phân tích hóa đơn với AI...'),
+              Text(
+                'Quá trình sẽ diễn ra từ 3-5s',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      try {
+        // Step 2: Process với ChatGPT OCR backend
+        final receiptData =
+            await ChatGptOcrService.processReceiptWithChatGPT(imageFile);
+
+        // Close loading dialog
+        if (mounted) Navigator.of(context).pop();
+
+        // Step 3: Show review dialog với kết quả
+        final reviewResult = await ReviewOCRHelper.showReviewDialog(
+          context,
+          receiptData,
+          imageFile,
+        );
+
+        if (reviewResult == null) return;
+
+        final finalData = reviewResult['receiptData'] as ReceiptData;
+        final finalImageFile = reviewResult['imageFile'] as XFile;
+
+        // Step 4: Apply data to form với category mapping
+        await _applyOCRDataWithCategoryMapping(finalData, finalImageFile);
+      } catch (e) {
+        // Close loading dialog
+        if (mounted) Navigator.of(context).pop();
+
+        // Show error message với format mới
+        if (mounted) {
+          String errorText = e.toString();
+          // Remove "Exception: " prefix nếu có
+          if (errorText.startsWith('Exception: ')) {
+            errorText = errorText.substring(11);
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorText),
+              backgroundColor: Colors.red[700],
+              duration: const Duration(seconds: 5),
+              action: SnackBarAction(
+                label: 'Thử lại',
+                textColor: Colors.white,
+                onPressed: () => _scanReceipt(),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ Error in _scanReceipt: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Lỗi khi quét hóa đơn: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Áp dụng dữ liệu OCR với category mapping từ ChatGPT
+  Future<void> _applyOCRDataWithCategoryMapping(
+      ReceiptData receiptData, XFile imageFile) async {
+    setState(() {
+      // Fill form fields
+      if (receiptData.merchantName != null) {
+        _titleController.text = receiptData.merchantName!;
+      }
+
+      if (receiptData.amount != null) {
+        // Set formatted amount theo currency đã chọn
+        if (_selectedCurrency != null) {
+          final formattedValue = CurrencyInputFormatter.formatCurrency(
+              receiptData.amount!, _selectedCurrency!.code);
+          _amountController.text = formattedValue;
+        } else {
+          _amountController.text = receiptData.amount!.toString();
+        }
+      }
+
+      if (receiptData.date != null) {
+        _selectedDate = receiptData.date!;
+      }
+
+      if (receiptData.description != null &&
+          receiptData.description!.isNotEmpty) {
+        _descriptionController.text = receiptData.description!;
+      }
+
+      // Add image to attachments if space available
+      if (_attachments.length < 5) {
+        _attachments.add(imageFile);
+      }
+    });
+
+    // Map category từ ChatGPT response
+    if (receiptData.categoryName != null &&
+        receiptData.categoryName!.isNotEmpty) {
+      try {
+        final categoryId = await ChatGptOcrService.getCategoryIdFromName(
+          receiptData.categoryName!,
+          widget.groupId,
+        );
+
+        if (categoryId != null) {
+          setState(() {
+            _selectedCategoryId = categoryId;
+          });
+
+          print(
+              '✅ Auto-selected category: ${receiptData.categoryName} (ID: $categoryId)');
+        }
+      } catch (e) {
+        print('⚠️ Could not map category "${receiptData.categoryName}": $e');
+      }
+    }
+
+    // Note: Removed success message notification as requested
   }
 
   void _showAddCategoryDialog(BuildContext context) {
@@ -122,16 +359,6 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                 decoration: const InputDecoration(labelText: "Mô tả"),
               ),
               const SizedBox(height: 16),
-              /*Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: HexColor.fromHex(selectedColor),
-                    child: Icon(Icons.category, color: Colors.white),
-                  ),
-                  const SizedBox(width: 8),
-                  Text("Icon và màu mặc định")
-                ],
-              )*/
             ],
           ),
         ),
@@ -221,13 +448,18 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+
     // Validate the selected payer
     if (_splitType == 'AMOUNT') {
       final totalSplitAmount = _splits.fold<double>(
         0,
         (sum, s) => sum + (double.tryParse(s['amount'] ?? '0') ?? 0),
       );
-      final totalAmount = double.tryParse(_amountController.text.trim()) ?? 0;
+      final totalAmount = _selectedCurrency != null
+          ? AmountParser.getPureDouble(
+                  _amountController.text, _selectedCurrency!.code) ??
+              0
+          : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0;
       if (totalSplitAmount.toStringAsFixed(2) !=
           totalAmount.toStringAsFixed(2)) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -250,6 +482,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         return;
       }
     }
+
     if (_selectedCategoryId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Vui lòng chọn danh mục')),
@@ -257,16 +490,27 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       return;
     }
 
+    if (_selectedCurrency == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng chọn loại tiền')),
+      );
+      return;
+    }
+
     final data = {
       'title': _titleController.text.trim(),
       'description': _descriptionController.text.trim(),
-      'amount': double.parse(_amountController.text.trim()),
+      'amount': _selectedCurrency != null
+          ? AmountParser.getPureDouble(
+                  _amountController.text, _selectedCurrency!.code) ??
+              0
+          : CurrencyInputFormatter.extractNumber(_amountController.text) ?? 0,
       'category': int.parse(_selectedCategoryId!),
       'splitType': _splitType,
       'participantId': _selectedPayerId,
       'groupId': widget.groupId,
       'expenseDate': _selectedDate.toIso8601String(),
-      'currency': 'VND',
+      'currency': _selectedCurrency!.code, // Gửi currency code thay vì cứng VND
       'splits': _splitType == 'EQUAL'
           ? null
           : _splits.map((s) {
@@ -301,12 +545,166 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
       }
 
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Đã tạo chi phí thành công!')),
+        );
         Navigator.pop(context, true);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi khi tạo expense: $e')),
+        SnackBar(content: Text('❌ Lỗi khi tạo expense: $e')),
       );
+    }
+  }
+
+  /// Lấy tỷ giá exchange rate từ API
+  Future<double?> _fetchExchangeRate(
+      String fromCurrency, String toCurrency) async {
+    if (fromCurrency == toCurrency) return 1.0;
+
+    try {
+      setState(() => _isLoadingExchangeRate = true);
+
+      // Sử dụng API thực tế từ backend
+      final response = await AuthService.dio.get(
+        '/exchange/rate',
+        queryParameters: {
+          'from': fromCurrency,
+          'to': toCurrency,
+        },
+      );
+
+      // Parse response theo cấu trúc API của backend
+      if (response.statusCode == 200 && response.data['result'] != null) {
+        final result = response.data['result'];
+
+        // Kiểm tra success flag
+        if (result['success'] == true || result['isSuccess'] == true) {
+          final rate = result['rate'] as double?;
+          return rate;
+        } else {
+          // API trả về error
+          final errorMessage = result['errorMessage'] ?? 'Unknown error';
+          print('❌ API Exchange Rate Error: $errorMessage');
+          return _getMockExchangeRate(fromCurrency, toCurrency);
+        }
+      } else {
+        print('❌ API Response Error: ${response.statusCode}');
+        return _getMockExchangeRate(fromCurrency, toCurrency);
+      }
+    } catch (e) {
+      print('❌ Lỗi khi lấy tỷ giá: $e');
+      // Fallback to mock rates nếu API fail
+      return _getMockExchangeRate(fromCurrency, toCurrency);
+    } finally {
+      setState(() => _isLoadingExchangeRate = false);
+    }
+  }
+
+  /// Mock exchange rates cho demo (thay thế bằng API thực)
+  double? _getMockExchangeRate(String fromCurrency, String toCurrency) {
+    print('🔄 Sử dụng mock exchange rate: $fromCurrency → $toCurrency');
+
+    // Mock rates với USD làm base (cập nhật tỷ giá realistic hơn)
+    final mockRates = {
+      'USD': 1.0,
+      'VND': 24500.0, // 1 USD = 24,500 VND
+      'EUR': 0.92, // 1 USD = 0.92 EUR
+      'GBP': 0.79, // 1 USD = 0.79 GBP
+      'JPY': 149.0, // 1 USD = 149 JPY
+      'CNY': 7.25, // 1 USD = 7.25 CNY
+      'KRW': 1320.0, // 1 USD = 1,320 KRW
+      'THB': 36.0, // 1 USD = 36 THB
+      'SGD': 1.36, // 1 USD = 1.36 SGD
+      'MYR': 4.68, // 1 USD = 4.68 MYR
+      'IDR': 15600.0, // 1 USD = 15,600 IDR
+      'PHP': 56.0, // 1 USD = 56 PHP
+      'AUD': 1.53, // 1 USD = 1.53 AUD
+      'CAD': 1.37, // 1 USD = 1.37 CAD
+      'CHF': 0.89, // 1 USD = 0.89 CHF
+    };
+
+    final fromRate = mockRates[fromCurrency];
+    final toRate = mockRates[toCurrency];
+
+    if (fromRate != null && toRate != null) {
+      final rate = toRate / fromRate;
+      print('📊 Mock Rate: 1 $fromCurrency = $rate $toCurrency');
+      return rate;
+    }
+
+    print('⚠️ Không tìm thấy mock rate cho $fromCurrency → $toCurrency');
+    return null;
+  }
+
+  /// Load exchange rate khi currency thay đổi
+  Future<void> _loadExchangeRateIfNeeded() async {
+    if (_selectedCurrency != null &&
+        _groupDefaultCurrencyCode != null &&
+        _selectedCurrency!.code != _groupDefaultCurrencyCode) {
+      print(
+          '🔄 Loading exchange rate: ${_selectedCurrency!.code} → $_groupDefaultCurrencyCode');
+
+      final rate = await _fetchExchangeRate(
+          _selectedCurrency!.code, _groupDefaultCurrencyCode!);
+
+      if (rate != null) {
+        print(
+            '✅ Exchange rate loaded: 1 ${_selectedCurrency!.code} = $rate $_groupDefaultCurrencyCode');
+      } else {
+        print('❌ Failed to load exchange rate');
+      }
+
+      setState(() => _currentExchangeRate = rate);
+    } else {
+      print('ℹ️ Same currency selected, no conversion needed');
+      setState(() => _currentExchangeRate = null);
+    }
+  }
+
+  /// Format converted amount để hiển thị
+  String _getConvertedAmountText() {
+    if (_currentExchangeRate == null || _amountController.text.isEmpty) {
+      return '';
+    }
+
+    final amount = _selectedCurrency != null
+        ? AmountParser.getPureDouble(
+            _amountController.text, _selectedCurrency!.code)
+        : CurrencyInputFormatter.extractNumber(_amountController.text);
+    if (amount == null) return '';
+
+    final convertedAmount = amount * _currentExchangeRate!;
+
+    return '${CurrencyFormatter.formatMoney(amount, _selectedCurrency!.code)} → ${CurrencyFormatter.formatMoney(convertedAmount, _groupDefaultCurrencyCode!)}';
+  }
+
+  /// Show currency picker modal
+  void _showCurrencyPicker(BuildContext context) async {
+    final selected = await CurrencyPickerModal.showShortList(
+      context: context,
+      currencies: _currencies,
+      selectedCurrency: _selectedCurrency,
+      defaultCurrencyCode: _groupDefaultCurrencyCode,
+    );
+
+    if (selected != null) {
+      // Re-format existing amount với currency mới
+      final currentValue = _selectedCurrency != null
+          ? AmountParser.getPureDouble(
+              _amountController.text, _selectedCurrency!.code)
+          : CurrencyInputFormatter.extractNumber(_amountController.text);
+
+      setState(() => _selectedCurrency = selected);
+
+      // Re-format amount với currency mới
+      if (currentValue != null && currentValue > 0) {
+        final formattedValue =
+            CurrencyInputFormatter.formatCurrency(currentValue, selected.code);
+        _amountController.text = formattedValue;
+      }
+
+      _loadExchangeRateIfNeeded(); // Load exchange rate khi currency thay đổi
     }
   }
 
@@ -323,6 +721,16 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          // OCR Scan Button in AppBar
+          IconButton(
+            onPressed: _scanReceipt,
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: 'Quét hóa đơn với ChatGPT AI',
+            iconSize: 28,
+          ),
+          const SizedBox(width: 8),
+        ],
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -353,19 +761,249 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                       validator: (val) =>
                           val == null || val.isEmpty ? 'Không để trống' : null,
                     ),
+                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _descriptionController,
                       decoration: const InputDecoration(labelText: 'Mô tả'),
                     ),
-                    TextFormField(
-                      controller: _amountController,
-                      decoration: const InputDecoration(labelText: 'Số tiền'),
-                      keyboardType: TextInputType.number,
-                      validator: (val) =>
-                          val == null || double.tryParse(val) == null
-                              ? 'Nhập số hợp lệ'
-                              : null,
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: _selectedCurrency != null
+                              ? AmountTextField(
+                                  currencyCode: _selectedCurrency!.code,
+                                  controller: _amountController,
+                                  focusNode: _amountFocusNode,
+                                  labelText: 'Số tiền',
+                                  onChanged: (value) {
+                                    // Trigger rebuild để update converted amount preview
+                                    if (_currentExchangeRate != null) {
+                                      setState(() {});
+                                    }
+                                  },
+                                )
+                              : TextFormField(
+                                  controller: _amountController,
+                                  focusNode: _amountFocusNode,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Số tiền'),
+                                  keyboardType: TextInputType.number,
+                                  validator: (val) {
+                                    if (val == null || val.isEmpty) {
+                                      return 'Nhập số hợp lệ';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          flex: 2,
+                          child: InkWell(
+                            onTap: () => _showCurrencyPicker(context),
+                            child: InputDecorator(
+                              decoration:
+                                  const InputDecoration(labelText: 'Tiền tệ'),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _selectedCurrency != null
+                                          ? _selectedCurrency!.code
+                                          : 'Chọn tiền tệ',
+                                      style: const TextStyle(fontSize: 16),
+                                    ),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_groupDefaultCurrencyCode != null &&
+                                          _selectedCurrency?.code ==
+                                              _groupDefaultCurrencyCode) ...[
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 4, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color:
+                                                Colors.green.withOpacity(0.2),
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                          ),
+                                          child: const Text(
+                                            'Mặc định',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.green,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                      ],
+                                      const Icon(Icons.arrow_drop_down),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+
+                    // Currency conversion info
+                    if (_selectedCurrency != null &&
+                        _groupDefaultCurrencyCode != null &&
+                        _selectedCurrency!.code !=
+                            _groupDefaultCurrencyCode) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: Colors.blue.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.swap_horiz,
+                                    size: 16, color: Colors.blue[700]),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Chuyển đổi tiền tệ',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.blue[700],
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Số tiền sẽ được tự động quy đổi từ ${_selectedCurrency!.code} sang $_groupDefaultCurrencyCode (tiền tệ mặc định của nhóm)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[600],
+                              ),
+                            ),
+
+                            // Exchange rate display
+                            if (_isLoadingExchangeRate) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.blue[600],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Đang tải tỷ giá...',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.blue[600],
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else if (_currentExchangeRate != null) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'Tỷ giá: 1 ${_selectedCurrency!.code} = ${NumberFormat('#,##0.######').format(_currentExchangeRate)} $_groupDefaultCurrencyCode',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+
+                              // Converted amount preview
+                              if (_amountController.text.isNotEmpty &&
+                                  (_selectedCurrency != null
+                                      ? AmountParser.getPureDouble(
+                                              _amountController.text,
+                                              _selectedCurrency!.code) !=
+                                          null
+                                      : CurrencyInputFormatter.extractNumber(
+                                              _amountController.text) !=
+                                          null)) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    _getConvertedAmountText(),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.orange[700],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ] else ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.warning_amber_rounded,
+                                        size: 14, color: Colors.orange[600]),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        'Không thể tải tỷ giá hiện tại (sử dụng tỷ giá ước tính)',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.orange[600],
+                                          fontStyle: FontStyle.italic,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+
                     const SizedBox(height: 12),
                     TextFormField(
                       readOnly: true,
@@ -417,16 +1055,22 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                       validator: (value) =>
                           value == null ? 'Vui lòng chọn danh mục' : null,
                     ),
+                    const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       value: _splitType,
-                      items: ['EQUAL', 'AMOUNT', 'PERCENTAGE']
-                          .map(
-                              (t) => DropdownMenuItem(value: t, child: Text(t)))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem(
+                            value: 'EQUAL', child: Text('Chia đều')),
+                        const DropdownMenuItem(
+                            value: 'AMOUNT', child: Text('Theo số tiền')),
+                        const DropdownMenuItem(
+                            value: 'PERCENTAGE', child: Text('Theo phần trăm')),
+                      ],
                       onChanged: (v) => setState(() => _splitType = v!),
                       decoration:
                           const InputDecoration(labelText: 'Kiểu chia tiền'),
                     ),
+                    const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
                       value: _selectedPayerId,
                       items: widget.participants
@@ -466,6 +1110,79 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                         }).toList(),
                       ),
                     const SizedBox(height: 16),
+
+                    // Smart Receipt Scanner Section
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFF667eea).withOpacity(0.1),
+                            const Color(0xFF764ba2).withOpacity(0.1),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFF764ba2).withOpacity(0.2),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.smart_toy,
+                                  color: Color(0xFF764ba2), size: 24),
+                              SizedBox(width: 8),
+                              Text(
+                                'ChatGPT Vision AI',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF764ba2),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Sử dụng ChatGPT AI để tự động nhận diện và phân loại hóa đơn',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _scanReceipt,
+                              icon: const Icon(Icons.smart_toy,
+                                  color: Colors.white),
+                              label: const Text(
+                                'Quét hóa đơn với ChatGPT AI',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF764ba2),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
                     GestureDetector(
                       onTap: _attachments.length >= 5 ? null : _pickAttachments,
                       child: Container(
@@ -502,109 +1219,66 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                         ),
                       ),
                     ),
-                    if (_attachments.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _attachments.length,
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 1,
-                        ),
-                        itemBuilder: (context, index) {
-                          final file = _attachments[index];
-                          return Stack(
-                            children: [
-                              GestureDetector(
-                                onTap: () {
-                                  showDialog(
-                                    context: context,
-                                    builder: (_) => _ImagePreviewDialog(
-                                      attachments: _attachments,
-                                      initialPage: index,
-                                    ),
-                                  );
-                                },
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: Image.file(
-                                    File(file.path),
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                    height: double.infinity,
-                                  ),
-                                ),
-                              ),
-                              Positioned(
-                                top: 4,
-                                right: 4,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(
-                                        () => _attachments.removeAt(index));
-                                  },
-                                  child: Container(
-                                    decoration: const BoxDecoration(
-                                      color: Colors.black54,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    padding: const EdgeInsets.all(2),
-                                    child: const Icon(Icons.close,
-                                        color: Colors.white, size: 18),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    Center(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF667eea), Color(0xFF764ba2)],
-                          ),
-                          borderRadius: BorderRadius.circular(15),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF667eea).withOpacity(0.3),
-                              blurRadius: 15,
-                              offset: const Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(15),
-                            onTap: _submit,
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 28, vertical: 12),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                mainAxisAlignment: MainAxisAlignment.center,
+                    const SizedBox(height: 12),
+                    if (_attachments.isNotEmpty)
+                      SizedBox(
+                        height: 120,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _attachments.length,
+                          itemBuilder: (context, index) {
+                            return Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              child: Stack(
                                 children: [
-                                  Icon(Icons.check, color: Colors.white),
-                                  SizedBox(width: 10),
-                                  Text(
-                                    'Xác nhận',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.file(
+                                      File(_attachments[index].path),
+                                      width: 100,
+                                      height: 100,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: GestureDetector(
+                                      onTap: () => setState(
+                                          () => _attachments.removeAt(index)),
+                                      child: Container(
+                                        decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        padding: const EdgeInsets.all(4),
+                                        child: const Icon(Icons.close,
+                                            size: 16, color: Colors.white),
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ),
+                            );
+                          },
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF667eea),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Tạo chi phí',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
@@ -613,6 +1287,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               ),
             ),
     );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _amountController.dispose();
+    _amountFocusNode.dispose();
+    super.dispose();
   }
 }
 
@@ -670,11 +1353,22 @@ class _ImagePreviewDialogState extends State<_ImagePreviewDialog> {
             },
           ),
           Positioned(
-            top: 32,
-            right: 32,
-            child: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white, size: 32),
-              onPressed: () => Navigator.pop(context),
+            top: 20,
+            right: 16,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 24),
+                onPressed: () => Navigator.pop(context),
+                padding: const EdgeInsets.all(8),
+                constraints: const BoxConstraints(
+                  minWidth: 40,
+                  minHeight: 40,
+                ),
+              ),
             ),
           ),
           Positioned(

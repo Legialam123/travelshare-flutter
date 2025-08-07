@@ -47,7 +47,15 @@ dependencies:
   path_provider: ^2.1.4
   path: ^1.9.0
   device_info_plus: ^10.1.2
-  fl_chart: ^1.0.0
+  fl_chart: ^0.69.2
+  
+  # OCR & AI/ML
+  google_mlkit_text_recognition: ^0.14.0
+  tflite_flutter: ^0.10.4
+  
+  # WebSocket
+  web_socket_channel: ^2.4.5
+  stomp_dart_client: ^0.4.4
 
 dev_dependencies:
   flutter_test:

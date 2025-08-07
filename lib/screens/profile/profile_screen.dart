@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,7 +6,6 @@ import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/auth_service.dart';
@@ -285,7 +283,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
-                        const SizedBox(height: 20), // Giảm khoảng cách trên xuống vì đã có AppBar
+                        const SizedBox(
+                            height:
+                                20), // Giảm khoảng cách trên xuống vì đã có AppBar
 
                         // 🎯 Profile Header - No Card
                         _fadeAnimation != null && _slideAnimation != null
@@ -525,7 +525,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                           onTap: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const UserStatisticsScreen()),
+                              MaterialPageRoute(
+                                  builder: (_) => const UserStatisticsScreen()),
                             );
                           },
                         ),

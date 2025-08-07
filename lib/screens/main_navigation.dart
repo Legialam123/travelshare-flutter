@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:travel_share/screens/home/home_screen.dart';
 import 'package:travel_share/screens/profile/profile_screen.dart';
-import 'package:travel_share/screens/settlement/settlement_overview_screen.dart';
-import 'package:travel_share/screens/request/request_screen.dart';
+import 'package:travel_share/screens/payment/payment_screen.dart';
 import 'package:travel_share/screens/notification/notification_screen.dart';
+import '../widgets/popup_notification.dart';
+import '../models/notification.dart';
+import 'dart:async';
+import '../services/stomp_service.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({Key? key}) : super(key: key);
@@ -12,23 +15,75 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation> 
+    with WidgetsBindingObserver {
   int _selectedIndex = 0;
+  bool _isNavigating = false;
 
   // Thêm GlobalKey cho NotificationScreen
-  final GlobalKey<NotificationScreenState> _notificationKey = GlobalKey<NotificationScreenState>();
+  final GlobalKey<NotificationScreenState> _notificationKey =
+      GlobalKey<NotificationScreenState>();
+  final GlobalKey<HomeScreenState> _homeScreenKey = HomeScreen.globalKey;
 
   late final List<Widget> _screens;
+  
+  // Thêm subscription cho notification
+  StreamSubscription<NotificationModel>? _notificationSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _screens = [
-      HomeScreen(onGroupDetailPop: _handleGroupDetailPop),
-      RequestScreen(),
+      HomeScreen(key: _homeScreenKey, onGroupDetailPop: _handleGroupDetailPop),
+      PaymentScreen(key: const ValueKey('payment_screen')),
       NotificationScreen(key: _notificationKey),
-      ProfileScreen(),
+      ProfileScreen(key: const ValueKey('profile_screen')),
     ];
+    _initStomp();
+  }
+
+  void _initStomp() async {
+    await StompService().connect();
+    _notificationSubscription = StompService().notificationStream.listen(
+      (notification) {
+        if (!mounted) return;
+        // Hiển thị popup notification
+        PopupNotification.show(
+          context,
+          notification,
+          onTap: () {
+            setState(() => _selectedIndex = 2);
+            _notificationKey.currentState?.reloadNotifications();
+          },
+        );
+        // Reload notification screen ở background
+        _notificationKey.currentState?.reloadNotifications();
+      },
+      onError: (e) {
+        print('Lỗi nhận notification realtime: $e');
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationSubscription?.cancel();
+    StompService().disconnect();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      StompService().connect();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      StompService().disconnect();
+    }
   }
 
   // Hàm callback khi pop từ GroupDetailScreen
@@ -36,9 +91,25 @@ class _MainNavigationState extends State<MainNavigation> {
     // Chỉ reload notification ở background, không chuyển tab
     _notificationKey.currentState?.reloadNotifications();
   }
+  
+  // Đã xóa toàn bộ các đoạn code liên quan đến WebSocketService để chuẩn bị tích hợp lại STOMP.
 
   void _onItemTapped(int index) {
+    if (_isNavigating || index == _selectedIndex) return;
+
+    _isNavigating = true;
     setState(() => _selectedIndex = index);
+
+    if (index == 0) {
+      _homeScreenKey.currentState?.loadGroupsByCategory();
+    }
+
+    // Debounce navigation
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        _isNavigating = false;
+      }
+    });
   }
 
   @override
@@ -46,9 +117,20 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: IndexedStack(
-          index: _selectedIndex,
-          children: _screens,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          switchInCurve: Curves.easeInOut,
+          switchOutCurve: Curves.easeInOut,
+          transitionBuilder: (Widget child, Animation<double> animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: child,
+            );
+          },
+          child: Container(
+            key: ValueKey(_selectedIndex),
+            child: _screens[_selectedIndex],
+          ),
         ),
       ),
       bottomNavigationBar: SafeArea(
@@ -124,14 +206,12 @@ class _MainNavigationState extends State<MainNavigation> {
                           )
                         : null,
                     child: Icon(
-                      _selectedIndex == 1
-                          ? Icons.inbox
-                          : Icons.inbox_outlined,
+                      _selectedIndex == 1 ? Icons.payment : Icons.payment_outlined,
                       color: Colors.white,
                       size: 20,
                     ),
                   ),
-                  label: 'Yêu cầu',
+                  label: 'Thanh toán',
                 ),
                 BottomNavigationBarItem(
                   icon: Container(

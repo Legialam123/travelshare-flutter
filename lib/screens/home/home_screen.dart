@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart';
 import '../group/create_group_screen.dart';
 import '../group/group_detail_screen.dart';
 import '../../models/group.dart';
 import '../../models/category.dart';
 import '../../services/group_service.dart';
 import '../../services/auth_service.dart';
-import '../../services/category_service.dart';
 import '../group/join_group_screen.dart';
 import '../../models/user.dart';
 import '../../utils/color_utils.dart';
@@ -16,12 +13,14 @@ import '../../utils/icon_utils.dart';
 class HomeScreen extends StatefulWidget {
   final VoidCallback? onGroupDetailPop;
   const HomeScreen({Key? key, this.onGroupDetailPop}) : super(key: key);
+  static final GlobalKey<HomeScreenState> globalKey =
+      GlobalKey<HomeScreenState>();
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late Future<Map<Category, List<Group>>> _groupsByCategoryFuture;
   User? _currentUser;
   Category? _selectedCategory;
@@ -53,7 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     ));
 
     _loadCurrentUser();
-    _loadGroupsByCategory();
+    loadGroupsByCategory();
     _animationController!.forward();
   }
 
@@ -68,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _currentUser = user);
   }
 
-  void _loadGroupsByCategory() {
+  void loadGroupsByCategory() {
     setState(() => _isLoading = true);
 
     // Đầu tiên, lấy tất cả nhóm bình thường
@@ -161,13 +160,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     builder: (context) => const CreateGroupScreen(),
                   ),
                 ).then((_) {
-                  _loadGroupsByCategory();
+                  loadGroupsByCategory();
                 });
               },
             ),
             ListTile(
               leading: const Icon(Icons.group_add_outlined),
-              title: const Text('Tham gia nhóm có sẵn'),
+              title: const Text('Tham gia nhóm đã tồn tại'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -175,7 +174,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   MaterialPageRoute(builder: (_) => const JoinGroupScreen()),
                 ).then((result) {
                   if (result == true) {
-                    _loadGroupsByCategory();
+                    loadGroupsByCategory();
                   }
                 });
               },
@@ -363,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Đã xoá nhóm thành công.')),
         );
-        _loadGroupsByCategory();
+        loadGroupsByCategory();
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -545,7 +544,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 8),
           Text(
-            'Tạo nhóm mới hoặc tham gia nhóm có sẵn',
+            'Tạo nhóm mới hoặc tham gia nhóm đã tồn tại',
             style: TextStyle(
               fontSize: 16,
               color: Colors.grey[500],
@@ -1008,7 +1007,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 );
                 // Luôn reload lại danh sách nhóm khi quay về
-                _loadGroupsByCategory();
+                loadGroupsByCategory();
                 if (widget.onGroupDetailPop != null) {
                   widget.onGroupDetailPop!();
                 }

@@ -20,6 +20,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phone = TextEditingController();
   final _dob = TextEditingController();
   bool _isLoading = false;
+  bool _showPassword = false;
 
   Future<void> _selectDate(BuildContext context) async {
     DateTime? picked = await showDatePicker(
@@ -266,8 +267,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
       padding: const EdgeInsets.only(bottom: 16),
       child: TextFormField(
         controller: c,
-        obscureText: obscure,
-        decoration: InputDecoration(labelText: label),
+        obscureText: obscure && !_showPassword,
+        decoration: InputDecoration(
+          labelText: label,
+          suffixIcon: obscure
+              ? IconButton(
+                  icon: Icon(_showPassword ? Icons.visibility : Icons.visibility_off),
+                  onPressed: () {
+                    setState(() {
+                      _showPassword = !_showPassword;
+                    });
+                  },
+                )
+              : null,
+        ),
         keyboardType: phone ? TextInputType.phone : TextInputType.text,
         validator: (value) {
           if (value == null || value.isEmpty) return 'Không được để trống';

@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import '../models/currency.dart';
 import 'auth_service.dart';
 

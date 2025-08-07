@@ -6,7 +6,6 @@ class Group {
   final String name;
   final UserSummaryResponse createdBy;
   final DateTime createdAt;
-  final double? budgetLimit;
   final String defaultCurrency;
   final String joinCode;
   final List<GroupParticipant> participants;
@@ -19,7 +18,6 @@ class Group {
     required this.name,
     required this.createdBy,
     required this.createdAt,
-    this.budgetLimit,
     required this.defaultCurrency,
     required this.participants,
     required this.groupImages,
@@ -36,9 +34,6 @@ class Group {
       name: json['name'],
       createdBy: UserSummaryResponse.fromJson(json['createdBy']),
       createdAt: DateTime.parse(json['createdAt']),
-      budgetLimit: (json['budgetLimit'] is num)
-          ? (json['budgetLimit'] as num).toDouble()
-          : double.tryParse(json['budgetLimit']?.toString() ?? ''),
       defaultCurrency: json['defaultCurrency'],
       participants: (json['participants'] as List)
           .map((e) => GroupParticipant.fromJson(e as Map<String, dynamic>))
@@ -73,19 +68,30 @@ class Group {
 }
 
 class UserSummaryResponse {
-  final String? fullName;
-  final String? username;
   final String? id;
+  final String? fullName;
+  final DateTime? dob;
+  final String? email;
+  final String? phoneNumber;
+  final String? role;
 
-  UserSummaryResponse({this.fullName, this.username, this.id});
+  UserSummaryResponse({
+    this.id,
+    this.fullName,
+    this.dob,
+    this.email,
+    this.phoneNumber,
+    this.role,
+  });
 
   factory UserSummaryResponse.fromJson(Map<String, dynamic> json) {
     return UserSummaryResponse(
+      id: json['id']?.toString(),
       fullName: json['fullName'],
-      username: json['username'],
-      id: json['id'] is String
-          ? json['id']
-          : int.tryParse(json['id']?.toString() ?? ''),
+      dob: json['dob'] != null ? DateTime.tryParse(json['dob']) : null,
+      email: json['email'],
+      phoneNumber: json['phoneNumber'],
+      role: json['role'],
     );
   }
 }
@@ -94,7 +100,6 @@ class GroupParticipant {
   final int id;
   final String name;
   final String role;
-  final String status;
   final DateTime? joinedAt;
   final UserSummaryResponse? user;
 
@@ -102,7 +107,6 @@ class GroupParticipant {
     required this.id,
     required this.name,
     required this.role,
-    required this.status,
     this.joinedAt,
     this.user,
   });
@@ -114,7 +118,6 @@ class GroupParticipant {
           : int.tryParse(json['id'].toString()) ?? 0,
       name: json['name'],
       role: json['role'],
-      status: json['status'].toString(),
       joinedAt:
           json['joinedAt'] != null ? DateTime.tryParse(json['joinedAt']) : null,
       user: json['user'] != null
@@ -122,6 +125,18 @@ class GroupParticipant {
           : null,
     );
   }
+  
+  // Helper method để xác định trạng thái participant
+  String get displayStatus {
+    if (user != null) {
+      return "Đã tham gia";  // Có user liên kết
+    } else {
+      return "Chờ tham gia";  // Chưa có user liên kết
+    }
+  }
+  
+  // Helper method để kiểm tra có user liên kết không
+  bool get hasLinkedUser => user != null;
 }
 
 class Media {

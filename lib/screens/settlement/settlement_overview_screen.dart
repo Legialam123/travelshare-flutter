@@ -1,18 +1,48 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 import '../../services/settlement_service.dart';
+import '../../utils/currency_formatter.dart';
 
 class SettlementOverviewScreen extends StatelessWidget {
   final int groupId;
-  const SettlementOverviewScreen({Key? key, required this.groupId}) : super(key: key);
+  const SettlementOverviewScreen({Key? key, required this.groupId})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: '₫', decimalDigits: 0);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Lịch sử thanh toán'),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: AppBar(
+            title: const Text(
+              'Lịch sử thanh toán',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+              ),
+            ),
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            iconTheme: const IconThemeData(color: Colors.white),
+            systemOverlayStyle: const SystemUiOverlayStyle(
+              statusBarColor: Colors.white,
+              statusBarIconBrightness: Brightness.dark,
+              statusBarBrightness: Brightness.light,
+            ),
+          ),
+        ),
       ),
+      backgroundColor: const Color(0xFFFCF8FF),
       body: FutureBuilder<List<dynamic>>(
         future: SettlementService.fetchSettlementHistory(groupId),
         builder: (context, snapshot) {
@@ -45,14 +75,23 @@ class SettlementOverviewScreen extends StatelessWidget {
                     status == 'COMPLETED' ? Icons.check_circle : Icons.cancel,
                     color: status == 'COMPLETED' ? Colors.green : Colors.red,
                   ),
-                  title: Text('$from → $to'),
+                  title: Text('$from → $to',
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Số tiền: ${currencyFormat.format(amount)}'),
-                      if (desc.isNotEmpty) Text(desc, style: const TextStyle(color: Colors.grey)),
-                      Text('Phương thức: $method'),
-                      if (date.isNotEmpty) Text('Ngày: $date', style: const TextStyle(fontSize: 12)),
+                      Text(
+                          'Số tiền: ${CurrencyFormatter.formatMoney((amount as num).toDouble(), s['currencyCode'] ?? 'VND')}',
+                          style: const TextStyle(color: Colors.black)),
+                      if (desc.isNotEmpty)
+                        Text(desc, style: const TextStyle(color: Colors.black)),
+                      Text('Phương thức: $method',
+                          style: const TextStyle(color: Colors.black)),
+                      if (date.isNotEmpty)
+                        Text('Ngày: $date',
+                            style: const TextStyle(
+                                fontSize: 13, color: Colors.black)),
                     ],
                   ),
                   trailing: Text(

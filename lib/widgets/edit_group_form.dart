@@ -6,6 +6,10 @@ import 'package:dio/dio.dart';
 import 'package:path/path.dart' as path;
 import '../../models/group.dart';
 import '../../services/auth_service.dart';
+import '../../models/category.dart';
+import '../../services/category_service.dart';
+import '../../utils/icon_utils.dart';
+import '../../utils/color_utils.dart';
 
 class EditGroupForm extends StatefulWidget {
   final Group group;
@@ -21,23 +25,45 @@ class EditGroupForm extends StatefulWidget {
 class _EditGroupFormState extends State<EditGroupForm> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
-  late TextEditingController _budgetController;
   late String _selectedCurrency;
   XFile? _pickedImage;
+  List<Category> _categories = [];
+  Category? _selectedCategory;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.group.name);
-    _budgetController =
-        TextEditingController(text: widget.group.budgetLimit?.toString() ?? '');
     _selectedCurrency = widget.group.defaultCurrency;
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final cats = await CategoryService.fetchGroupCategories();
+      for (var cat in cats) {}
+      setState(() {
+        _categories = cats;
+        if (widget.group.categoryId != null && cats.isNotEmpty) {
+          _selectedCategory = cats.firstWhere(
+            (c) => c.id == widget.group.categoryId,
+            orElse: () => cats.first,
+          );
+        } else if (cats.isNotEmpty) {
+          _selectedCategory = cats.first;
+        } else {
+          _selectedCategory = null;
+        }
+      });
+    } catch (e) {
+      // Có thể show lỗi hoặc để trống danh mục
+      print('Error loading categories: $e');
+    }
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _budgetController.dispose();
     super.dispose();
   }
 
@@ -105,16 +131,15 @@ class _EditGroupFormState extends State<EditGroupForm> {
       'description': 'avatar',
     });
 
-    await AuthService.dio.post('/media/group/${widget.group.id}', data: formData);
+    await AuthService.dio
+        .post('/media/group/${widget.group.id}', data: formData);
   }
 
   Future<void> _updateGroupInfo() async {
     final data = {
       'name': _nameController.text.trim(),
-      'budgetLimit': double.tryParse(_budgetController.text),
-      'defaultCurrencyCode': _selectedCurrency,
+      'categoryId': _selectedCategory?.id,
     };
-
     await AuthService.dio.put('/group/${widget.group.id}', data: data);
   }
 
@@ -177,21 +202,47 @@ class _EditGroupFormState extends State<EditGroupForm> {
                     : null,
               ),
               const SizedBox(height: 8),
-              TextFormField(
-                controller: _budgetController,
-                decoration: const InputDecoration(labelText: "Ngân sách"),
-                keyboardType: TextInputType.number,
-              ),
+              // Đã loại bỏ trường chỉnh sửa tiền tệ
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _selectedCurrency,
-                decoration: const InputDecoration(labelText: "Đơn vị tiền tệ"),
-                items: ["VND", "USD", "EUR"]
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) setState(() => _selectedCurrency = value);
-                },
+              DropdownButtonFormField<Category>(
+                value: _selectedCategory,
+                decoration: const InputDecoration(labelText: "Danh mục nhóm"),
+                items: _categories.isNotEmpty
+                    ? _categories
+                        .map((c) => DropdownMenuItem<Category>(
+                              value: c,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    getIconDataFromCode(c.iconCode),
+                                    size: 24,
+                                    color:
+                                        c.color != null && c.color!.isNotEmpty
+                                            ? getColorFromHex(c.color!)
+                                            : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(c.name),
+                                ],
+                              ),
+                            ))
+                        .toList()
+                    : [
+                        const DropdownMenuItem<Category>(
+                          value: null,
+                          child: Text('Không có danh mục'),
+                        ),
+                      ],
+                onChanged: _categories.isNotEmpty
+                    ? (value) {
+                        setState(() {
+                          _selectedCategory = value;
+                        });
+                      }
+                    : null,
+                validator: (value) =>
+                    value == null ? 'Vui lòng chọn danh mục' : null,
+                disabledHint: const Text('Không có danh mục'),
               ),
               const SizedBox(height: 16),
               Center(
@@ -236,7 +287,8 @@ class _EditGroupFormState extends State<EditGroupForm> {
                         }
                       },
                       child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           mainAxisAlignment: MainAxisAlignment.center,

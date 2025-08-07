@@ -84,10 +84,21 @@ class SettlementService {
     }
   }
 
+  /// Lấy danh sách settlements của một user
+  static Future<List<dynamic>> fetchUserSettlements(String userId) async {
+    final response = await AuthService.dio.get('/settlement/user/$userId');
+    if (response.statusCode == 200 && response.data['result'] != null) {
+      return response.data['result'] as List;
+    } else {
+      throw Exception('Không thể tải danh sách giao dịch của user');
+    }
+  }
+
   /// Xác nhận settlement (chuyển sang COMPLETED)
   static Future<bool> confirmSettlement(int settlementId) async {
     try {
-      final response = await AuthService.dio.patch('/settlement/$settlementId/confirm', data: {
+      final response = await AuthService.dio
+          .patch('/settlement/$settlementId/confirm', data: {
         'status': 'COMPLETED',
       });
       return response.statusCode == 200;
@@ -96,7 +107,7 @@ class SettlementService {
     }
   }
 
-  /// Lấy lịch sử thanh toán (COMPLETED/FAILED) cho một nhóm
+  /// Lấy lịch sử thanh toán (COMPLETED/FAILED/PENDING) cho một nhóm
   static Future<List<dynamic>> fetchSettlementHistory(int groupId) async {
     try {
       final response = await AuthService.dio.get(
@@ -105,6 +116,37 @@ class SettlementService {
       return response.data['result'] as List;
     } catch (e) {
       throw Exception('Không thể tải lịch sử thanh toán: $e');
+    }
+  }
+
+  /// Lấy số dư của user theo từng nhóm
+  static Future<List<dynamic>> fetchUserBalancesByGroup(String userId) async {
+    final response =
+        await AuthService.dio.get('/settlement/user/$userId/groups');
+    if (response.statusCode == 200 && response.data['result'] != null) {
+      return response.data['result'] as List;
+    } else {
+      throw Exception('Không thể tải số dư các nhóm của user');
+    }
+  }
+
+  /// Lấy số dư của tất cả thành viên trong một nhóm
+  static Future<List<dynamic>> fetchGroupBalances(int groupId) async {
+    try {
+      final response = await AuthService.dio.get('/settlement/group/$groupId/balances');
+      if (response.statusCode == 200 && response.data['result'] != null) {
+        return response.data['result'] as List;
+      } else {
+        throw Exception('API trả về lỗi: ${response.statusCode}');
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        // Nhóm chưa có balance nào
+        return [];
+      }
+      throw Exception('Lỗi mạng: ${e.message}');
+    } catch (e) {
+      throw Exception('Không thể tải số dư nhóm: $e');
     }
   }
 }
